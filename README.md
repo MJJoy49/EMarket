@@ -1,4 +1,5 @@
 # EMarket
+```
 EMarket/
 ├─ .github/                                        ← chore/repo-config ✔
 │  ├─ workflows/ci.yml
@@ -228,3 +229,6 @@ EMarket/
    ├─ Orders/ Returns/                               ← feature/orders-*, returns-refunds
    ├─ Admin/ Reports/ Settings/                      ← প্রতিটা admin-* branch নিজেরটা
    └─ Integration/ (আসল DB দিয়ে, Testcontainers)      ← chore/hardening
+
+
+   ```

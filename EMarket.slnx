@@ -1,0 +1,9 @@
+<Solution>
+  <Project Path="src/EMarket.Api/EMarket.Api.csproj" />
+  <Project Path="src/EMarket.BLL/EMarket.BLL.csproj" />
+  <Project Path="src/EMarket.DAL/EMarket.DAL.csproj" />
+  <Project Path="src/EMarket.Domain/EMarket.Domain.csproj" />
+  <Project Path="src/EMarket.Shared/EMarket.Shared.csproj" />
+  <Project Path="src/EMarket.Web/EMarket.Web.csproj" />
+  <Project Path="tests/EMarket.Tests/EMarket.Tests.csproj" />
+</Solution>

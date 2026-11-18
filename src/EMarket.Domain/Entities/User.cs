@@ -39,7 +39,7 @@ public partial class User
 
     public DateTime UpdatedAt { get; set; }
 
-    public virtual Address? Address { get; set; }
+    public virtual ICollection<Address> Addresses { get; set; } = new List<Address>();
 
     public virtual ICollection<AspNetUserClaim> AspNetUserClaims { get; set; } = new List<AspNetUserClaim>();
 

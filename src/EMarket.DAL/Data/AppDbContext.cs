@@ -132,8 +132,8 @@ public partial class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_Address_DivisionId");
 
-            entity.HasOne(d => d.User).WithOne(p => p.Address)
-                .HasForeignKey<Address>(d => d.UserId)
+            entity.HasOne(d => d.User).WithMany(p => p.Addresses)
+                .HasForeignKey(d => d.UserId)
                 .HasConstraintName("FK_Address_UserId");
         });
 

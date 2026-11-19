@@ -2,6 +2,7 @@ using System.Threading.RateLimiting;
 using EMarket.Api.Infrastructure;
 using EMarket.BLL;
 using EMarket.BLL.Identity;
+using EMarket.BLL.Payments;
 using EMarket.DAL;
 using EMarket.Shared.Constants;
 using EMarket.Shared.Results;
@@ -31,6 +32,18 @@ if (!string.IsNullOrWhiteSpace(keysFolder))
 {
     dataProtection.PersistKeysToFileSystem(new DirectoryInfo(keysFolder));
 }
+// AD-7: the gateway is an outside party. Session start and refunds are not retried blindly; the stand-in is used without credentials.
+var gateway = GatewayOptions.From(builder.Configuration);
+builder.Services.AddSingleton(gateway);
+if (gateway.Mode == "SslCommerz")
+{
+    builder.Services.AddHttpClient<IPaymentGateway, SslCommerzGateway>(client => client.Timeout = TimeSpan.FromSeconds(10));
+}
+else
+{
+    builder.Services.AddSingleton<IPaymentGateway, FakeGateway>();
+}
+
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 

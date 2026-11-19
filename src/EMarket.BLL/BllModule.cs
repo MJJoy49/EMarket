@@ -3,6 +3,8 @@ using EMarket.BLL.Common;
 using EMarket.BLL.Finance;
 using EMarket.BLL.Shopping;
 using EMarket.BLL.Identity;
+using EMarket.BLL.Orders;
+using EMarket.BLL.Payments;
 using EMarket.BLL.Profile;
 using EMarket.BLL.Sellers;
 using EMarket.Domain.Entities;
@@ -33,6 +35,9 @@ public static class BllModule
         services.AddScoped<Ledger>();
         services.AddScoped<CartService>();
         services.AddScoped<CheckoutService>();
+        services.AddScoped<OrderService>();
+        services.AddScoped<PaymentService>();
+        services.AddScoped<RefundService>();
         return services;
     }
 }

@@ -246,7 +246,7 @@ public sealed class CartService(AppDbContext db, ISettingsReader settings, ICloc
     public static decimal DeliveryFee(Shop shop, decimal subtotal, bool insideDhaka, decimal defaultFee, decimal defaultFreeAbove)
     {
         var freeAbove = shop.FreeDeliveryAbove ?? defaultFreeAbove;
-        if (freeAbove > 0 && subtotal >= freeAbove)
+        if (freeAbove > 0 && subtotal > freeAbove) // "free delivery above Tk 2,000": exactly 2,000 still pays
         {
             return 0;
         }

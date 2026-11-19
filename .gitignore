@@ -428,3 +428,4 @@ FodyWeavers.xsd
 # Uploaded files and data-protection keys (never commit)
 private-files/
 dp-keys/
+tools/.e2e/

@@ -5,16 +5,22 @@ using EMarket.Shared.Constants;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using SkiaSharp;
 
 namespace EMarket.BLL.Common;
 
 /// <summary>A file sent by a user. The BLL checks it; the API only hands it over.</summary>
 public sealed record UploadFile(Stream Content, long Length);
 
+public sealed record SavedImage(string Path, string ThumbPath);
+
 public interface IFileStorage
 {
     /// <summary>Checks the real file type (JPG or PNG by signature) and the 2 MB limit, then saves under a random name.</summary>
     Task<string> SaveImageAsync(UploadFile file, string folder, CancellationToken ct = default);
+
+    /// <summary>Same checks, plus a small copy for lists (NFR-56).</summary>
+    Task<SavedImage> SaveImageWithThumbnailAsync(UploadFile file, string folder, CancellationToken ct = default);
 
     Stream? Open(string path);
 
@@ -27,7 +33,13 @@ public sealed class LocalFileStorage(IConfiguration config) : IFileStorage
     public const long MaxBytes = 2 * 1024 * 1024;
     private readonly string root = Path.GetFullPath(config["Storage:Root"] ?? Path.Combine(AppContext.BaseDirectory, "private-files"));
 
-    public async Task<string> SaveImageAsync(UploadFile file, string folder, CancellationToken ct = default)
+    public async Task<string> SaveImageAsync(UploadFile file, string folder, CancellationToken ct = default) =>
+        (await SaveAsync(file, folder, thumbnail: false, ct)).Path;
+
+    public Task<SavedImage> SaveImageWithThumbnailAsync(UploadFile file, string folder, CancellationToken ct = default) =>
+        SaveAsync(file, folder, thumbnail: true, ct);
+
+    private async Task<SavedImage> SaveAsync(UploadFile file, string folder, bool thumbnail, CancellationToken ct)
     {
         if (file.Length is <= 0 or > MaxBytes)
         {
@@ -37,16 +49,46 @@ public sealed class LocalFileStorage(IConfiguration config) : IFileStorage
         using var buffer = new MemoryStream();
         await file.Content.CopyToAsync(buffer, ct);
         var bytes = buffer.ToArray();
-        var extension = ImageExtension(bytes) ?? throw new AppException(400, Messages.BadFile);
-        if (bytes.Length > MaxBytes)
+        var extension = ImageExtension(bytes);
+        if (extension is null || bytes.Length > MaxBytes)
         {
             throw new AppException(400, Messages.BadFile);
         }
 
-        var relative = Path.Combine(folder, $"{Guid.NewGuid():N}{extension}");
+        // NFR-37: decode and encode again, which drops hidden data such as EXIF and anything appended to the file.
+        using var bitmap = Decode(bytes) ?? throw new AppException(400, Messages.BadFile);
+        var name = Guid.NewGuid().ToString("N");
+        var format = extension == ".png" ? SKEncodedImageFormat.Png : SKEncodedImageFormat.Jpeg;
+        var path = await WriteAsync(bitmap, Path.Combine(folder, name + extension), format, ct);
+        if (!thumbnail)
+        {
+            return new SavedImage(path, path);
+        }
+
+        const int side = 320;
+        var scale = Math.Min(1f, side / (float)Math.Max(bitmap.Width, bitmap.Height));
+        var info = new SKImageInfo(Math.Max(1, (int)(bitmap.Width * scale)), Math.Max(1, (int)(bitmap.Height * scale)));
+        using var small = bitmap.Resize(info, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear))
+            ?? throw new AppException(400, Messages.BadFile);
+        var thumb = await WriteAsync(small, Path.Combine(folder, name + "_thumb.jpg"), SKEncodedImageFormat.Jpeg, ct);
+        return new SavedImage(path, thumb);
+    }
+
+    // SKBitmap.Decode throws on some broken files instead of returning null, so open the codec first.
+    private static SKBitmap? Decode(byte[] bytes)
+    {
+        using var data = SKData.CreateCopy(bytes);
+        using var codec = SKCodec.Create(data);
+        return codec is null ? null : SKBitmap.Decode(codec);
+    }
+
+    private async Task<string> WriteAsync(SKBitmap bitmap, string relative, SKEncodedImageFormat format, CancellationToken ct)
+    {
         var full = Resolve(relative);
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        await File.WriteAllBytesAsync(full, bytes, ct);
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(format, 85) ?? throw new AppException(400, Messages.BadFile);
+        await File.WriteAllBytesAsync(full, data.ToArray(), ct);
         return relative.Replace('\\', '/');
     }
 

@@ -16,6 +16,19 @@ public static class TestDb
             .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
             .Options;
         var db = new AppDbContext(options);
+
+        // SQL Server fills rowversion columns itself; the in-memory provider does not, so imitate it.
+        db.SavingChanges += (_, _) =>
+        {
+            foreach (var entry in db.ChangeTracker.Entries())
+            {
+                if (entry.State is EntityState.Added or EntityState.Modified && entry.Metadata.FindProperty("RowVersion") is not null)
+                {
+                    entry.Property("RowVersion").CurrentValue = Guid.NewGuid().ToByteArray()[..8];
+                }
+            }
+        };
+
         foreach (var role in new[] { Roles.Buyer, Roles.Seller, Roles.Admin })
         {
             db.AspNetRoles.Add(new AspNetRole { Id = Guid.NewGuid(), Name = role, NormalizedName = role.ToUpperInvariant() });
@@ -59,6 +72,12 @@ public sealed class FakeFiles : IFileStorage
         var path = $"{folder}/{Guid.NewGuid():N}.jpg";
         Saved.Add(path);
         return Task.FromResult(path);
+    }
+
+    public async Task<SavedImage> SaveImageWithThumbnailAsync(UploadFile file, string folder, CancellationToken ct = default)
+    {
+        var path = await SaveImageAsync(file, folder, ct);
+        return new SavedImage(path, path.Replace(".jpg", "_thumb.jpg"));
     }
 
     public Stream? Open(string path) => Saved.Contains(path) ? new MemoryStream([1, 2, 3]) : null;

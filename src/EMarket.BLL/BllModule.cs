@@ -1,3 +1,4 @@
+using EMarket.BLL.Catalog;
 using EMarket.BLL.Common;
 using EMarket.BLL.Identity;
 using EMarket.BLL.Profile;
@@ -24,6 +25,9 @@ public static class BllModule
         services.AddScoped<ProfileService>();
         services.AddScoped<AddressService>();
         services.AddScoped<SellerApplicationService>();
+        services.AddScoped<CategoryService>();
+        services.AddScoped<ProductService>();
+        services.AddScoped<CatalogQueryService>();
         return services;
     }
 }

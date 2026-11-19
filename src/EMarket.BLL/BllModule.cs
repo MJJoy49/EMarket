@@ -1,5 +1,7 @@
 using EMarket.BLL.Catalog;
 using EMarket.BLL.Common;
+using EMarket.BLL.Finance;
+using EMarket.BLL.Shopping;
 using EMarket.BLL.Identity;
 using EMarket.BLL.Profile;
 using EMarket.BLL.Sellers;
@@ -28,6 +30,9 @@ public static class BllModule
         services.AddScoped<CategoryService>();
         services.AddScoped<ProductService>();
         services.AddScoped<CatalogQueryService>();
+        services.AddScoped<Ledger>();
+        services.AddScoped<CartService>();
+        services.AddScoped<CheckoutService>();
         return services;
     }
 }

@@ -400,7 +400,7 @@ public sealed class ProductService(AppDbContext db, CategoryService categories, 
     }
 
     // Variants that are left out of the form are switched off, not deleted, because old orders point to them.
-    private static void ApplyVariants(Product product, List<VariantInput> inputs)
+    private void ApplyVariants(Product product, List<VariantInput> inputs)
     {
         var keep = new HashSet<Guid>();
         foreach (var input in inputs)
@@ -410,6 +410,7 @@ public sealed class ProductService(AppDbContext db, CategoryService categories, 
             {
                 variant = new ProductVariant { Id = Guid.CreateVersion7(), ProductId = product.Id };
                 product.ProductVariants.Add(variant);
+                db.ProductVariants.Add(variant); // insert, even when the product is already tracked
             }
 
             variant.Sku = input.Sku.Trim();

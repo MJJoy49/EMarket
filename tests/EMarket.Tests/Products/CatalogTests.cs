@@ -100,6 +100,17 @@ public sealed class CatalogTests
     }
 
     [Fact]
+    public async Task A_variant_can_be_added_to_an_existing_product()
+    {
+        var id = await products.CreateAsync(seller.Id, Request());
+
+        await products.UpdateAsync(seller.Id, id, Request("Samsung Galaxy A15", 20000, new VariantInput { Colour = "Blue", Size = "128GB", Sku = "A15-BLUE", Stock = 4 }));
+
+        var variant = await db.ProductVariants.SingleAsync(v => v.ProductId == id);
+        (variant.OptionText, variant.Stock).ShouldBe(("Blue / 128GB", 4));
+    }
+
+    [Fact]
     public async Task Discount_price_must_be_lower_than_price()
     {
         var request = Request();

@@ -9,6 +9,8 @@ namespace EMarket.Tests.TestUtils;
 /// <summary>An in-memory database with the three roles, plus helpers to add common rows.</summary>
 public static class TestDb
 {
+    private static int orderSequence;
+
     public static AppDbContext Create()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
@@ -25,6 +27,12 @@ public static class TestDb
                 if (entry.State is EntityState.Added or EntityState.Modified && entry.Metadata.FindProperty("RowVersion") is not null)
                 {
                     entry.Property("RowVersion").CurrentValue = Guid.NewGuid().ToByteArray()[..8];
+                }
+
+                // SQL Server takes the order number from a sequence (DB-6).
+                if (entry is { State: EntityState.Added, Entity: Order { OrderNumber: null } order })
+                {
+                    order.OrderNumber = $"EM-20261118-{Interlocked.Increment(ref orderSequence):D6}";
                 }
             }
         };

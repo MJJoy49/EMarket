@@ -1,9 +1,11 @@
+using EMarket.BLL.Admin;
 using EMarket.BLL.AfterSale;
 using EMarket.BLL.Catalog;
 using EMarket.BLL.Common;
 using EMarket.BLL.Finance;
 using EMarket.BLL.Shopping;
 using EMarket.BLL.Identity;
+using EMarket.BLL.Messaging;
 using EMarket.BLL.Orders;
 using EMarket.BLL.Payments;
 using EMarket.BLL.Profile;
@@ -43,6 +45,13 @@ public static class BllModule
         services.AddScoped<ReviewService>();
         services.AddScoped<NotificationService>();
         services.AddScoped<EarningsService>();
+        services.AddScoped<UserAdminService>();
+        services.AddScoped<ContentAdminService>();
+        services.AddScoped<ReportService>();
+        services.AddScoped<ReportsGuard>();
+        services.AddScoped<OutboxProcessor>();
+        services.AddScoped<ScheduledJobs>();
+        services.AddSingleton<IEmailSender, SmtpEmailSender>();
         return services;
     }
 }

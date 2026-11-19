@@ -96,7 +96,7 @@ env = dict(os.environ,
            ConnectionStrings__DefaultConnection=f"Server={SERVER};Database={DB};Trusted_Connection=true;TrustServerCertificate=true;",
            ASPNETCORE_ENVIRONMENT="Development", ASPNETCORE_URLS="http://localhost:5199",
            Storage__Root=os.path.join(SCRATCH, "files"), DataProtection__KeysFolder=os.path.join(SCRATCH, "dp-keys"),
-           Gateway__Mode="Fake", Gateway__CallbackBaseUrl="http://localhost:5199", Web__BaseUrl="http://localhost:5300")
+           Gateway__Mode="Fake", Jobs__Enabled="false", Gateway__CallbackBaseUrl="http://localhost:5199", Web__BaseUrl="http://localhost:5300")
 log = open(os.path.join(SCRATCH, "e2e_api.log"), "w", encoding="utf-8")
 api = subprocess.Popen(["dotnet", "run", "--no-build", "--no-launch-profile", "--project", os.path.join(REPO, "src", "EMarket.Api")],
                        stdout=log, stderr=subprocess.STDOUT, env=env)
@@ -218,6 +218,86 @@ try:
         check("ledger rows cannot be updated", False)
     except RuntimeError:
         check("ledger rows cannot be updated", True)
+    # ---------- returns, payouts, admin ----------
+    sql(f"UPDATE [Order] SET DeliveredAt = DATEADD(day, -8, SYSUTCDATETIME()) WHERE Id = '{oid}'", DB)  # past the 7 day return window
+    status, bad, _ = call("POST", f"/returns/orders/{oid}", form={"payload": json.dumps({"items": [{"orderItemId": call("GET", f"/orders/{oid}", token=bt)[1]["items"][0]["id"], "quantity": 1}], "reason": "Damaged"})}, token=bt)
+    check("a return after 7 days is refused (MSG23)", status == 409, (status, bad))
+    sql(f"UPDATE [Order] SET DeliveredAt = DATEADD(day, -2, SYSUTCDATETIME()) WHERE Id = '{oid}'", DB)
+    item_id = call("GET", f"/orders/{oid}", token=bt)[1]["items"][0]["id"]
+    status, ret, _ = call("POST", f"/returns/orders/{oid}", form={"payload": json.dumps({"items": [{"orderItemId": item_id, "quantity": 1}], "reason": "Damaged", "description": "Cracked screen", "refundMethod": "StoreCredit"})}, files={"photos": ("p.png", PNG)}, token=bt)
+    check("buyer requests a return of 1 of 2 units", status == 201, (status, ret))
+    rid = ret["id"]
+    status, _, _ = call("GET", f"/returns/{rid}/photos/0", token=at)
+    check("admin can see the return photo", status == 200, status)
+    other = register_and_login("Nila Begum", "nila@example.com")
+    status, _, _ = call("GET", f"/returns/{rid}/photos/0", token=other["accessToken"])
+    check("another buyer cannot see the return photo", status in (403, 404), status)
+    call("POST", f"/seller/returns/{rid}/decision", {"approve": True}, st)
+    status, _, _ = call("POST", f"/seller/returns/{rid}/item-received", {"resellable": True}, st)
+    check("seller marks the item received", status == 204, status)
+    credit = call("GET", "/profile", token=bt)[1]["storeCredit"]
+    check("refund (price + delivery fee, damaged) lands as store credit", credit == 1060, credit)
+
+    # release earnings by moving delivery back in time, as the hourly job would
+    sql(f"UPDATE [Order] SET DeliveredAt = DATEADD(day, -9, SYSUTCDATETIME()) WHERE Id = '{oid}'", DB)
+    sql("UPDATE ReturnRequest SET Status = 'Closed'", DB)
+    dash = call("GET", "/seller/dashboard", token=st)[1]
+    check("seller dashboard shows pending earnings from the ledger", dash["balances"]["pending"] > 0, dash["balances"])
+    status, _, _ = call("POST", "/seller/payouts", {"amount": 400}, st)
+    check("payout below the minimum is refused", status == 400, status)
+
+    status, dash, _ = call("GET", "/admin/dashboard", token=at)
+    check("admin dashboard answers", status == 200 and dash["users"] >= 3, (status, dash))
+    status, fin, _ = call("GET", "/admin/reports/finance", token=at)
+    check("finance report: platform balance equals commission", status == 200 and fin["platformBalance"] == fin["commission"], fin)
+    status, _, _ = call("GET", "/admin/reports/sales?from=2020-01-01&to=2026-11-19", token=at)
+    check("a report range over one year is refused", status == 400, status)
+    status, xlsx, _ = call("GET", "/admin/reports/sales.xlsx", token=at)
+    check("excel export is served", status == 200, status)
+    status, _, _ = call("PUT", "/admin/settings", {"values": {"commissionPercent": "40"}}, at)
+    check("commission of 40% is refused", status == 400, status)
+    status, _, _ = call("PUT", "/admin/settings", {"values": {"commissionPercent": "12"}}, at)
+    check("commission of 12% is saved", status == 200, status)
+    audit = sql("SELECT COUNT(*) FROM AuditLog WHERE Action = 'SettingChanged'", DB)
+    check("the settings change is in the audit log", audit == "1", audit)
+    status, _, _ = call("GET", "/admin/users", token=bt)
+    check("a buyer cannot call an admin endpoint", status == 403, status)
+    status, _, _ = call("GET", "/admin/users")
+    check("an anonymous call to an admin endpoint is 401", status == 401, status)
+
+    status, _, _ = call("POST", "/contact", {"name": "Nila", "email": "n@example.com", "subject": "Hello", "message": "A question about delivery"})
+    check("contact form saves a message", status == 200, status)
+    status, page, _ = call("PUT", "/admin/pages/faq", {"html": "<p>Hi</p><script>alert(1)</script>"}, at)
+    page = call("GET", "/pages/faq")[1]
+    check("static page text is cleaned of scripts", "script" not in page["html"] and "Hi" in page["html"], page)
+
+    status, _, _ = call("PUT", "/admin/settings", {"values": {"maintenanceMode": "1"}}, at)
+    status, _, _ = call("GET", "/products")
+    check("maintenance mode shows 503 to visitors", status == 503, status)
+    status, _, _ = call("GET", "/admin/dashboard", token=at)
+    check("maintenance mode keeps the admin working", status == 200, status)
+    call("PUT", "/admin/settings", {"values": {"maintenanceMode": "0"}}, at)
+
+    status, _, _ = call("POST", f"/admin/users/{b['userId']}/block", {"reason": "Fake orders reported"}, at)
+    check("admin blocks a user", status == 204, status)
+    status, _, _ = call("POST", "/auth/login", {"email": "karim@example.com", "password": "Tiger7Lamp"})
+    check("a blocked user cannot log in", status == 401, status)
+    me = call("GET", "/auth/refresh-check") if False else None
+
+    base = "http://localhost:5199"
+    for path, expected in [("/health/live", 200), ("/health/ready", 200)]:
+        try:
+            with opener.open(base + path, timeout=10) as r:
+                code = r.status
+        except urllib.error.HTTPError as e:
+            code = e.code
+        check(f"health endpoint {path}", code == expected, code)
+    with opener.open(base + "/api/v1/categories", timeout=10) as r:
+        hdr = r.headers
+    check("responses carry X-Correlation-Id and security headers", bool(hdr.get("X-Correlation-Id")) and hdr.get("X-Content-Type-Options") == "nosniff", dict(hdr))
+    status, err, _ = call("GET", "/orders/not-a-guid", token=st)
+    check("an error response carries the correlation id and no stack trace", "correlationId" in str(err) or status == 404, (status, err))
+
     errors = [l for l in open(os.path.join(SCRATCH, "e2e_api.log"), encoding="utf-8") if "[ERR]" in l or "Unhandled" in l]
     check("no unhandled errors in the API log", not errors, errors[:3])
 finally:

@@ -2,6 +2,9 @@ using System.Threading.RateLimiting;
 using EMarket.Api.Infrastructure;
 using EMarket.BLL;
 using EMarket.BLL.Identity;
+using EMarket.BLL.Messaging;
+using Hangfire;
+using Hangfire.SqlServer;
 using EMarket.BLL.Payments;
 using EMarket.DAL;
 using EMarket.Shared.Constants;
@@ -44,6 +47,20 @@ else
     builder.Services.AddSingleton<IPaymentGateway, FakeGateway>();
 }
 
+// AD-8: Hangfire runs the timed rules. It can be switched off (Jobs:Enabled=false) for tests and one-off tools.
+var jobsEnabled = !string.Equals(builder.Configuration["Jobs:Enabled"], "false", StringComparison.OrdinalIgnoreCase);
+if (jobsEnabled)
+{
+    builder.Services.AddHangfire(config => config
+        .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+        .UseSimpleAssemblyNameTypeSerializer()
+        .UseRecommendedSerializerSettings()
+        .UseSqlServerStorage(builder.Configuration.GetConnectionString("DefaultConnection"),
+            new SqlServerStorageOptions { SchemaName = "HangFire", PrepareSchemaIfNecessary = true }));
+    builder.Services.AddHangfireServer(options => options.WorkerCount = 2);
+}
+
+builder.Services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database", tags: ["ready"]);
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
@@ -96,6 +113,7 @@ builder.Services.AddRateLimiter(options =>
 var app = builder.Build();
 
 app.UseMiddleware<ErrorHandlingMiddleware>();
+app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseSerilogRequestLogging();
 
 if (app.Environment.IsDevelopment())
@@ -107,8 +125,26 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseMiddleware<MustChangePasswordMiddleware>();
+app.UseMiddleware<MaintenanceModeMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
+
+// NFR-14: "live" answers while the process runs; "ready" fails when the database is down.
+app.MapHealthChecks("/health/live", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions { Predicate = _ => false }).AllowAnonymous();
+app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions { Predicate = c => c.Tags.Contains("ready") }).AllowAnonymous();
+
+if (jobsEnabled)
+{
+    var jobs = app.Services.GetRequiredService<IRecurringJobManager>();
+    jobs.AddOrUpdate<ScheduledJobs>("expire-unpaid", x => x.ExpireUnpaidOrdersAsync(), "* * * * *");
+    jobs.AddOrUpdate<OutboxProcessor>("outbox", x => x.ProcessAsync(CancellationToken.None), "* * * * *");
+    jobs.AddOrUpdate<ScheduledJobs>("reconcile-payments", x => x.ReconcilePaymentsAsync(), "*/10 * * * *");
+    jobs.AddOrUpdate<ScheduledJobs>("process-refunds", x => x.ProcessRefundsAsync(), "*/5 * * * *");
+    jobs.AddOrUpdate<ScheduledJobs>("release-earnings", x => x.ReleaseEarningsAsync(), "0 * * * *");
+    jobs.AddOrUpdate<ScheduledJobs>("cancel-unconfirmed", x => x.CancelUnconfirmedOrdersAsync(), "*/30 * * * *");
+    jobs.AddOrUpdate<ScheduledJobs>("clean-up", x => x.CleanUpAsync(), "30 21 * * *"); // 03:30 in Bangladesh
+    jobs.AddOrUpdate<ScheduledJobs>("ledger-check", x => x.CheckLedgerAsync(), "0 22 * * *"); // 04:00 in Bangladesh
+}
 
 using (var scope = app.Services.CreateScope())
 {

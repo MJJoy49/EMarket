@@ -68,7 +68,8 @@ public static class TestDb
 
 public sealed class FakeClock : IClock
 {
-    public DateTime UtcNow { get; set; } = new(2026, 11, 18, 6, 0, 0, DateTimeKind.Utc);
+    // Starts at the real time, because the DAL stamps CreatedAt and UpdatedAt with the real clock.
+    public DateTime UtcNow { get; set; } = DateTime.UtcNow;
 }
 
 public sealed class FakeFiles : IFileStorage

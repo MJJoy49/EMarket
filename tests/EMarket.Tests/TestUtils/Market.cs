@@ -37,10 +37,11 @@ public sealed class Market
     public Shop Shop { get; }
     public Guid AddressId { get; }
     public PasswordHasher<User> Hasher { get; } = new();
+    public MemoryCache Cache { get; } = new(new MemoryCacheOptions());
 
     public Market()
     {
-        var settings = new SettingsReader(Db, new MemoryCache(new MemoryCacheOptions()));
+        var settings = new SettingsReader(Db, Cache);
         var notifier = new Notifier(Db, Clock);
         var gateway = new FakeGateway(new GatewayOptions());
         Ledger = new Ledger(Db);

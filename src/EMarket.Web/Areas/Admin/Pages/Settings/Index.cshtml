@@ -1,0 +1,55 @@
+@page "/admin/settings"
+@using EMarket.Shared.Dtos.Admin
+@{
+    ViewData["Title"] = "System settings";
+}
+@functions {
+    public IReadOnlyList<SettingDto> Settings { get; private set; } = [];
+
+    public async Task OnGetAsync() => Settings = (await Api.GetAsync<List<SettingDto>>("api/v1/admin/settings")).Data ?? [];
+
+    public async Task<IActionResult> OnPostAsync()
+    {
+        // Only the settings on the form are sent; the API checks every one against its own range (FR-21.6).
+        var values = Request.Form.Where(f => f.Key.StartsWith("s_")).ToDictionary(f => f.Key[2..], f => f.Value.ToString());
+        var maintenance = Request.Form["maintenance"].ToString() == "on" ? "1" : "0";
+        values["maintenanceMode"] = maintenance;
+        var result = await Api.PutAsync<Empty>("api/v1/admin/settings", new { values });
+        if (!result.Ok) { Problem(result.Message); await OnGetAsync(); return Page(); }
+        Success(Messages.Saved);
+        return RedirectToPage();
+    }
+}
+
+<h1 class="h3">System settings</h1>
+<p class="text-muted">A change applies to later orders and events only. Every change is saved in the audit log.</p>
+<form method="post" novalidate>
+    @foreach (var group in Settings.GroupBy(s => s.Group))
+    {
+        <fieldset class="card card-body mb-3">
+            <legend class="h5">@group.Key</legend>
+            <div class="row g-3">
+                @foreach (var s in group.Where(s => s.Key != "maintenanceMode"))
+                {
+                    <div class="col-md-6">
+                        <label class="form-label" for="s_@s.Key">@s.Description</label>
+                        @if (s.ValueType == "Text") { <input class="form-control" id="s_@s.Key" name="s_@s.Key" value="@s.Value" maxlength="300" required /> }
+                        else { <input class="form-control" id="s_@s.Key" name="s_@s.Key" type="number" value="@s.Value" min="@s.Min" max="@s.Max" step="@(s.ValueType == "Int" ? "1" : "0.01")" required /><div class="form-text">Allowed: @s.Min to @s.Max</div> }
+                    </div>
+                }
+                @if (group.Key == "Site")
+                {
+                    var maintenance = group.First(s => s.Key == "maintenanceMode");
+                    <div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" id="maintenance" name="maintenance" checked="@(maintenance.Value == "1")" /><label class="form-check-label" for="maintenance">Maintenance mode (visitors see the Maintenance page, admins can still work)</label></div></div>
+                }
+            </div>
+        </fieldset>
+    }
+    <button class="btn btn-primary" type="submit">Save settings</button>
+</form>
+
+<section class="card card-body mt-4" aria-labelledby="pages">
+    <h2 class="h5" id="pages">Information pages</h2>
+    <p class="text-muted small mb-2">Edit the text of About, FAQ, Terms, Privacy and Seller Terms. Scripts are removed when you save.</p>
+    <ul class="mb-0">@foreach (var (slug, title) in new[] { ("about", "About"), ("faq", "FAQ"), ("terms", "Terms"), ("privacy", "Privacy"), ("seller-terms", "Seller Terms") }) { <li><a asp-page="/Settings/Page" asp-route-slug="@slug">@title</a></li> }</ul>
+</section>

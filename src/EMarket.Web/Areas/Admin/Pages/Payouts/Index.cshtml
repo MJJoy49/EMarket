@@ -1,0 +1,66 @@
+@page "/admin/payouts"
+@using EMarket.Shared.Dtos.Sellers
+@using EMarket.Shared.Results
+@{
+    ViewData["Title"] = "Payout requests";
+}
+@functions {
+    public PagedResult<PayoutDto>? Payouts { get; private set; }
+    public string Current => Request.Query["status"].ToString();
+
+    public async Task OnGetAsync()
+    {
+        var result = await Api.GetAsync<PagedResult<PayoutDto>>($"api/v1/admin/payouts?status={Uri.EscapeDataString(Current)}&page={Math.Max(1, int.TryParse(Request.Query["page"], out var p) ? p : 1)}");
+        if (!Failed(result)) { Payouts = result.Data; }
+    }
+
+    // FR-18.7: the money is sent outside the system first; here the admin records it with a reference.
+    public async Task<IActionResult> OnPostPayAsync(Guid id, string referenceNo)
+    {
+        if (!Failed(await Api.PostAsync<Empty>($"api/v1/admin/payouts/{id}/pay", new { referenceNo }))) { Success("Marked as paid. The seller was told."); }
+        return RedirectToPage(new { status = Current });
+    }
+
+    public async Task<IActionResult> OnPostRejectAsync(Guid id, string reason)
+    {
+        if (!Failed(await Api.PostAsync<Empty>($"api/v1/admin/payouts/{id}/reject", new { reason }))) { Success("Rejected. The amount is available to the seller again."); }
+        return RedirectToPage(new { status = Current });
+    }
+}
+
+<h1 class="h3">Payout requests</h1>
+<ul class="nav nav-pills mb-3" aria-label="Payout status">
+    @foreach (var (value, text) in new[] { ("Requested", "Requested"), ("Paid", "Paid"), ("Rejected", "Rejected"), ("Cancelled", "Cancelled"), ("", "All") })
+    {
+        <li class="nav-item"><a class="nav-link @(Current == value ? "active" : "")" asp-page="/Payouts/Index" asp-route-status="@value">@text</a></li>
+    }
+</ul>
+@if (Payouts is null || Payouts.Items.Count == 0) { <p class="text-muted">No payout requests here.</p> return; }
+@foreach (var p in Payouts.Items)
+{
+    <article class="card card-body mb-3">
+        <div class="d-flex flex-wrap justify-content-between gap-2">
+            <h2 class="h6 mb-0">@p.ShopName &middot; @Format.Tk(p.Amount)</h2>
+            <span><span class="badge @Format.Badge(p.Status)">@p.Status</span> <span class="text-muted small">@Format.DateTime(p.RequestedAt)</span></span>
+        </div>
+        <p class="mb-1">Send to: <strong>@p.Method</strong> <code>@p.Account</code></p>
+        @if (p.Balances is { } b) { <p class="small text-muted mb-2">Balances: available @Format.Tk(b.Available), reserved @Format.Tk(b.Reserved), pending @Format.Tk(b.Pending), paid out @Format.Tk(b.PaidOut)</p> }
+        @if (p.Status == "Requested")
+        {
+            <div class="d-flex flex-wrap gap-2">
+                <form class="d-flex gap-2" method="post" asp-page-handler="Pay" asp-route-id="@p.Id" data-confirm="Have you sent the money? This records it as paid.">
+                    <label class="visually-hidden" for="ref-@p.Id">Reference number</label>
+                    <input class="form-control form-control-sm" id="ref-@p.Id" name="referenceNo" minlength="3" maxlength="50" required placeholder="Reference number" />
+                    <button class="btn btn-primary btn-sm" type="submit">Mark as paid</button>
+                </form>
+                <form class="d-flex gap-2" method="post" asp-page-handler="Reject" asp-route-id="@p.Id">
+                    <label class="visually-hidden" for="why-@p.Id">Reason</label>
+                    <input class="form-control form-control-sm" id="why-@p.Id" name="reason" minlength="10" maxlength="500" required placeholder="Reason to reject" />
+                    <button class="btn btn-outline-danger btn-sm" type="submit">Reject</button>
+                </form>
+            </div>
+        }
+        else if (!string.IsNullOrEmpty(p.ReferenceNo ?? p.RejectionReason)) { <p class="small mb-0">@(p.ReferenceNo is not null ? $"Reference {p.ReferenceNo}" : $"Reason: {p.RejectionReason}")</p> }
+    </article>
+}
+<partial name="_Pager" model="(Payouts.Page, Payouts.TotalPages)" />

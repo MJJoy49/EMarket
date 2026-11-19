@@ -1,0 +1,95 @@
+@page "/admin/reports"
+@using EMarket.Shared.Dtos.Admin
+@{
+    ViewData["Title"] = "Reports";
+}
+@functions {
+    public SalesReportDto? Sales { get; private set; }
+    public FinanceReportDto? Finance { get; private set; }
+    public UserReportDto? UsersReport { get; private set; }
+    public string View => Request.Query["view"].ToString() is "finance" or "users" ? Request.Query["view"].ToString() : "sales";
+    public string Q(string name) => Request.Query[name].ToString();
+
+    public async Task OnGetAsync()
+    {
+        var range = $"from={Q("from")}&to={Q("to")}";
+        if (View == "finance") { Finance = (await Api.GetAsync<FinanceReportDto>("api/v1/admin/reports/finance")).Data; return; }
+        if (View == "users") { var u = await Api.GetAsync<UserReportDto>($"api/v1/admin/reports/users?{range}"); if (!Failed(u)) { UsersReport = u.Data; } return; }
+        var sales = await Api.GetAsync<SalesReportDto>($"api/v1/admin/reports/sales?{range}&groupBy={(Q("groupBy") is "week" or "month" ? Q("groupBy") : "day")}");
+        if (!Failed(sales)) { Sales = sales.Data; }
+    }
+
+    public async Task<IActionResult> OnGetExportAsync()
+    {
+        var file = await Api.DownloadAsync($"api/v1/admin/reports/sales.xlsx?from={Q("from")}&to={Q("to")}&groupBy={Q("groupBy")}");
+        if (!file.Ok) { Problem(file.Message); return RedirectToPage(); }
+        return File(file.Data!.Content, file.Data.ContentType, file.Data.FileName ?? "sales.xlsx");
+    }
+}
+
+<h1 class="h3">Reports</h1>
+<ul class="nav nav-pills mb-3" aria-label="Report type">
+    @foreach (var (value, text) in new[] { ("sales", "Sales"), ("users", "Users"), ("finance", "Finance") })
+    {
+        <li class="nav-item"><a class="nav-link @(View == value ? "active" : "")" asp-page="/Reports/Index" asp-route-view="@value">@text</a></li>
+    }
+</ul>
+
+@if (View != "finance")
+{
+    <form class="row g-2 mb-3" method="get">
+        <input type="hidden" name="view" value="@View" />
+        <div class="col-6 col-md-3"><label class="form-label" for="from">From</label><input class="form-control" id="from" name="from" type="date" value="@Q("from")" /></div>
+        <div class="col-6 col-md-3"><label class="form-label" for="to">To</label><input class="form-control" id="to" name="to" type="date" value="@Q("to")" /></div>
+        @if (View == "sales") { <div class="col-6 col-md-2"><label class="form-label" for="g">Group by</label><select class="form-select" id="g" name="groupBy"><option value="day">Day</option><option value="week" selected="@(Q("groupBy") == "week")">Week</option><option value="month" selected="@(Q("groupBy") == "month")">Month</option></select></div> }
+        <div class="col-12 col-md-4 d-flex align-items-end gap-2">
+            <button class="btn btn-outline-primary" type="submit">Show</button>
+            @if (View == "sales") { <button class="btn btn-outline-secondary" type="submit" asp-page-handler="Export">Export to Excel</button><button class="btn btn-outline-secondary d-print-none" type="button" data-print>Print</button> }
+        </div>
+    </form>
+    <p class="small text-muted">The range defaults to the last 30 days and cannot be longer than one year.</p>
+}
+
+@if (View == "sales" && Sales is not null)
+{
+    <div class="row g-3 mb-3">
+        @foreach (var (label, value) in new[] { ("Orders", Sales.Orders.ToString()), ("Gross sales", Format.Tk(Sales.GrossSales)), ("Commission", Format.Tk(Sales.Commission)), ("Delivered", Sales.Delivered.ToString()), ("Cancelled", Sales.Cancelled.ToString()) })
+        {
+            <div class="col-6 col-md-3 col-xl"><div class="stat-tile"><div class="text-muted small">@label</div><div class="value">@value</div></div></div>
+        }
+    </div>
+    var chartModel = ("Sales by period", (IReadOnlyList<(string Label, decimal Value)>)Sales.Series.Select(p => (p.Label, p.Value)).ToList());
+    <section class="card card-body mb-3"><h2 class="h5">Sales by @Sales.GroupBy</h2><partial name="_BarChart" model="chartModel" /></section>
+    <div class="row g-3">
+        <div class="col-lg-6"><section class="card card-body"><h2 class="h6">Top products</h2>
+            <ol class="mb-0">@foreach (var p in Sales.TopProducts) { <li>@p.Label: @Format.Tk(p.Value) (@p.Count sold)</li> }</ol></section></div>
+        <div class="col-lg-6"><section class="card card-body"><h2 class="h6">Top sellers</h2>
+            <ol class="mb-0">@foreach (var p in Sales.TopSellers) { <li>@p.Label: @Format.Tk(p.Value) (@p.Count orders)</li> }</ol></section></div>
+    </div>
+    <table class="table table-sm mt-3 table-cards"><thead><tr><th scope="col">Period</th><th scope="col">Orders</th><th scope="col">Sales</th></tr></thead>
+        <tbody>@foreach (var p in Sales.Series) { <tr><td data-label="Period">@p.Label</td><td data-label="Orders">@p.Count</td><td data-label="Sales">@Format.Tk(p.Value)</td></tr> }</tbody>
+        <tfoot><tr class="fw-bold"><td>Total</td><td>@Sales.Series.Sum(p => p.Count)</td><td>@Format.Tk(Sales.Series.Sum(p => p.Value))</td></tr></tfoot></table>
+}
+
+@if (View == "users" && UsersReport is not null)
+{
+    <div class="row g-3 mb-3">
+        @foreach (var (label, value) in new[] { ("New users", UsersReport.NewUsers), ("Buyers", UsersReport.Buyers), ("Sellers", UsersReport.Sellers) })
+        {
+            <div class="col-6 col-md-3"><div class="stat-tile"><div class="text-muted small">@label</div><div class="value">@value</div></div></div>
+        }
+    </div>
+    var usersChart = ("New users by day", (IReadOnlyList<(string Label, decimal Value)>)UsersReport.Series.Select(p => (p.Label, p.Value)).ToList());
+    <section class="card card-body"><h2 class="h5">New registrations</h2><partial name="_BarChart" model="usersChart" /></section>
+}
+
+@if (View == "finance" && Finance is not null)
+{
+    <p class="text-muted">Every figure comes from the ledger. Platform balance = received - refunds - payouts - seller balances - store credit - money held for undelivered orders.</p>
+    <div class="row g-3">
+        @foreach (var (label, value) in new[] { ("Money received", Finance.Received), ("Refunds paid", Finance.Refunds), ("Commission", Finance.Commission), ("Payouts paid", Finance.PayoutsPaid), ("Seller balances", Finance.SellerBalances), ("Store credit held", Finance.StoreCreditHeld), ("Held for undelivered orders", Finance.OrderMoneyHeld), ("Platform balance", Finance.PlatformBalance) })
+        {
+            <div class="col-6 col-md-4 col-xl-3"><div class="stat-tile"><div class="text-muted small">@label</div><div class="value">@Format.Tk(value)</div></div></div>
+        }
+    </div>
+}

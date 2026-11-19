@@ -1,0 +1,7 @@
+# Local services for development. SQL Server Express is installed on the machine (see README).
+services:
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    ports:
+      - "1025:1025"   # SMTP, used by the API (Smtp:Host and Smtp:Port)
+      - "8025:8025"   # web inbox: http://localhost:8025

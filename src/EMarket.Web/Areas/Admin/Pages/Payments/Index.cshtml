@@ -1,0 +1,80 @@
+@page "/admin/payments"
+@using EMarket.Shared.Dtos.Admin
+@using EMarket.Shared.Results
+@{
+    ViewData["Title"] = "Payments";
+}
+@functions {
+    public PagedResult<PaymentRowDto>? Payments { get; private set; }
+    public PagedResult<LedgerRowDto>? Ledger { get; private set; }
+    public IReadOnlyList<Guid> Unbalanced { get; private set; } = [];
+    public string View => Request.Query["view"].ToString() == "ledger" ? "ledger" : "payments";
+    public string Q(string name) => Request.Query[name].ToString();
+
+    public async Task OnGetAsync()
+    {
+        var page = Math.Max(1, int.TryParse(Q("page"), out var p) ? p : 1);
+        if (View == "ledger")
+        {
+            Ledger = (await Api.GetAsync<PagedResult<LedgerRowDto>>($"api/v1/admin/ledger?kind={Uri.EscapeDataString(Q("kind"))}&from={Q("from")}&to={Q("to")}&page={page}")).Data;
+            Unbalanced = (await Api.GetAsync<List<Guid>>("api/v1/admin/ledger/unbalanced")).Data ?? [];
+            return;
+        }
+
+        var result = await Api.GetAsync<PagedResult<PaymentRowDto>>($"api/v1/admin/payments?method={Q("method")}&status={Q("status")}&from={Q("from")}&to={Q("to")}&page={page}");
+        if (!Failed(result)) { Payments = result.Data; }
+    }
+}
+
+<h1 class="h3">Payments and ledger</h1>
+<ul class="nav nav-pills mb-3" aria-label="Payment views">
+    <li class="nav-item"><a class="nav-link @(View == "payments" ? "active" : "")" asp-page="/Payments/Index">Payments</a></li>
+    <li class="nav-item"><a class="nav-link @(View == "ledger" ? "active" : "")" asp-page="/Payments/Index" asp-route-view="ledger">Ledger</a></li>
+</ul>
+<form class="row g-2 mb-3" method="get">
+    <input type="hidden" name="view" value="@View" />
+    @if (View == "payments")
+    {
+        <div class="col-6 col-md-3"><label class="form-label" for="method">Method</label><select class="form-select" id="method" name="method"><option value="">All</option>@foreach (var m in new[] { "COD", "bKash", "Nagad", "Card" }) { <option selected="@(Q("method") == m)">@m</option> }</select></div>
+        <div class="col-6 col-md-3"><label class="form-label" for="status">Status</label><select class="form-select" id="status" name="status"><option value="">All</option>@foreach (var s in new[] { "Initiated", "Unpaid", "Paid", "Failed", "Cancelled", "Expired", "PartlyRefunded", "Refunded" }) { <option selected="@(Q("status") == s)">@s</option> }</select></div>
+    }
+    else { <div class="col-12 col-md-3"><label class="form-label" for="kind">Kind</label><input class="form-control" id="kind" name="kind" value="@Q("kind")" placeholder="For example OrderReceived" /></div> }
+    <div class="col-6 col-md-2"><label class="form-label" for="from">From</label><input class="form-control" id="from" name="from" type="date" value="@Q("from")" /></div>
+    <div class="col-6 col-md-2"><label class="form-label" for="to">To</label><input class="form-control" id="to" name="to" type="date" value="@Q("to")" /></div>
+    <div class="col-12 col-md-2 d-flex align-items-end"><button class="btn btn-outline-primary w-100" type="submit">Filter</button></div>
+</form>
+
+@if (View == "payments")
+{
+    @if (Payments is null || Payments.Items.Count == 0) { <p class="text-muted">No payments found.</p> return; }
+    <table class="table align-middle table-cards">
+        <thead><tr><th scope="col">Transaction</th><th scope="col">Orders</th><th scope="col">Method</th><th scope="col">Amount</th><th scope="col">Status</th><th scope="col">Checked</th></tr></thead>
+        <tbody>
+            @foreach (var p in Payments.Items)
+            {
+                <tr class="@(p.NeedsAttention ? "table-warning" : "")">
+                    <td data-label="Transaction"><code>@(p.TransactionId ?? "-")</code><div class="small text-muted">@Format.DateTime(p.CreatedAt)</div></td><td data-label="Orders">@p.Orders</td><td data-label="Method">@p.Method</td>
+                    <td data-label="Amount">@Format.Tk(p.Amount)</td><td data-label="Status"><span class="badge @Format.Badge(p.Status)">@p.Status</span>@if (p.NeedsAttention) { <span class="badge text-bg-warning">Check</span> }</td>
+                    <td data-label="Checked">@(p.LastCheckedAt is { } c ? Format.DateTime(c) : "-")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <partial name="_Pager" model="(Payments.Page, Payments.TotalPages)" />
+}
+else
+{
+    @if (Unbalanced.Count > 0) { <div class="alert alert-danger" role="alert">@Unbalanced.Count ledger transaction(s) do not add up to 0. Please check them.</div> }
+    else { <div class="alert alert-success" role="status">Every ledger transaction is balanced.</div> }
+    @if (Ledger is null || Ledger.Items.Count == 0) { <p class="text-muted">No ledger lines found.</p> return; }
+    <table class="table table-sm align-middle table-cards">
+        <thead><tr><th scope="col">Date</th><th scope="col">Account</th><th scope="col">Kind</th><th scope="col">Order</th><th scope="col">Shop or user</th><th scope="col" class="text-end">Amount</th></tr></thead>
+        <tbody>
+            @foreach (var l in Ledger.Items)
+            {
+                <tr><td data-label="Date">@Format.DateTime(l.At)</td><td data-label="Account">@l.Account</td><td data-label="Kind">@l.Kind</td><td data-label="Order">@l.OrderNumber</td><td data-label="Shop or user">@(l.ShopName ?? l.UserName)</td><td data-label="Amount" class="text-end">@Format.Tk(l.Amount)</td></tr>
+            }
+        </tbody>
+    </table>
+    <partial name="_Pager" model="(Ledger.Page, Ledger.TotalPages)" />
+}

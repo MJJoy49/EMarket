@@ -1,0 +1,154 @@
+@page "/admin/users"
+@using System.Text.Json
+@using EMarket.Shared.Dtos.Admin
+@using EMarket.Shared.Results
+@{
+    ViewData["Title"] = "Users";
+}
+@functions {
+    [BindProperty] public CreateAdminRequest NewAdmin { get; set; } = new();
+    public PagedResult<UserRowDto>? Users { get; private set; }
+    public PagedResult<ShopRowDto>? Shops { get; private set; }
+    public string View => Request.Query["view"].ToString() is "sellers" or "shops" or "admins" ? Request.Query["view"].ToString() : "buyers";
+
+    public async Task OnGetAsync()
+    {
+        var search = Uri.EscapeDataString(Request.Query["search"].ToString());
+        var page = Math.Max(1, int.TryParse(Request.Query["page"], out var p) ? p : 1);
+        if (View == "shops")
+        {
+            Shops = (await Api.GetAsync<PagedResult<ShopRowDto>>($"api/v1/admin/shops?search={search}&status={Request.Query["status"]}&page={page}")).Data;
+            return;
+        }
+
+        var role = View switch { "sellers" => "Seller", "admins" => "Admin", _ => "Buyer" };
+        var result = await Api.GetAsync<PagedResult<UserRowDto>>($"api/v1/admin/users?search={search}&role={role}&status={Request.Query["status"]}&page={page}");
+        if (!Failed(result)) { Users = result.Data; }
+    }
+
+    public async Task<IActionResult> OnPostUserAsync(Guid id, string action, string? reason)
+    {
+        var result = action switch
+        {
+            "block" => await Api.PostAsync<Empty>($"api/v1/admin/users/{id}/block", new { reason }),
+            "unblock" => await Api.PostAsync<Empty>($"api/v1/admin/users/{id}/unblock"),
+            "delete" => await Api.DeleteAsync<Empty>($"api/v1/admin/users/{id}", new { reason }),
+            _ => null,
+        };
+        if (result is not null && !Failed(result)) { Success(Messages.Saved); }
+        return RedirectToPage(new { view = Request.Query["view"].ToString() });
+    }
+
+    public async Task<IActionResult> OnPostShopAsync(Guid id, string action, string reason)
+    {
+        var result = await Api.PostAsync<Empty>($"api/v1/admin/shops/{id}/{(action == "suspend" ? "suspend" : "reactivate")}", new { reason });
+        if (!Failed(result)) { Success(Messages.Saved); }
+        return RedirectToPage(new { view = "shops" });
+    }
+
+    // FR-16.9: the temporary password is shown once, here, and stored nowhere.
+    public async Task<IActionResult> OnPostAdminAsync()
+    {
+        var result = await Api.PostAsync<JsonElement>("api/v1/admin/admins", NewAdmin);
+        if (!result.Ok) { Problem(result.Message); return RedirectToPage(new { view = "admins" }); }
+        TempData["TempPassword"] = $"{NewAdmin.Email}: {result.Data.GetProperty("temporaryPassword").GetString()}";
+        return RedirectToPage(new { view = "admins" });
+    }
+}
+
+<h1 class="h3">Users</h1>
+<ul class="nav nav-pills mb-3 flex-wrap" aria-label="User groups">
+    @foreach (var (value, text) in new[] { ("buyers", "Buyers"), ("sellers", "Sellers"), ("shops", "Shops"), ("admins", "Admins") })
+    {
+        <li class="nav-item"><a class="nav-link @(View == value ? "active" : "")" asp-page="/Users/Index" asp-route-view="@value">@text</a></li>
+    }
+</ul>
+<form class="d-flex gap-2 mb-3" method="get" role="search">
+    <input type="hidden" name="view" value="@View" />
+    <label class="visually-hidden" for="search">Search by name, email or phone</label>
+    <input class="form-control" id="search" name="search" value="@Request.Query["search"]" placeholder="Search by name, email or phone" />
+    <label class="visually-hidden" for="status">Status</label>
+    <select class="form-select w-auto" id="status" name="status" data-autosubmit>
+        <option value="">All statuses</option>
+        @foreach (var s in View == "shops" ? new[] { "Active", "Vacation", "Suspended" } : new[] { "Active", "Blocked", "Deleted" }) { <option selected="@(Request.Query["status"] == s)">@s</option> }
+    </select>
+    <button class="btn btn-outline-primary" type="submit">Search</button>
+</form>
+
+@if (TempData["TempPassword"] is string temp)
+{
+    <div class="alert alert-warning" role="alert"><strong>Temporary password (shown once):</strong> <code>@temp</code><br />The new admin must change it at first login.</div>
+}
+
+@if (View == "shops")
+{
+    @if (Shops is null || Shops.Items.Count == 0) { <p class="text-muted">No shops found.</p> }
+    else
+    {
+        <table class="table align-middle table-cards">
+            <thead><tr><th scope="col">Shop</th><th scope="col">Owner</th><th scope="col">Status</th><th scope="col">Rating</th><th scope="col">Sales</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+            <tbody>
+                @foreach (var s in Shops.Items)
+                {
+                    <tr>
+                        <td data-label="Shop"><a asp-area="" asp-page="/Shops/Show" asp-route-slug="@s.Slug">@s.Name</a></td><td data-label="Owner">@s.OwnerName</td>
+                        <td data-label="Status"><span class="badge @Format.Badge(s.Status)">@s.Status</span></td><td data-label="Rating">@s.Rating.ToString("0.0")</td><td data-label="Sales">@Format.Tk(s.Sales)</td>
+                        <td class="text-end">
+                            <form class="d-flex gap-1" method="post" asp-page-handler="Shop" asp-route-id="@s.Id">
+                                <label class="visually-hidden" for="r-@s.Id">Reason</label>
+                                <input class="form-control form-control-sm" id="r-@s.Id" name="reason" minlength="10" maxlength="500" required placeholder="Reason (10 characters or more)" />
+                                @if (s.Status == "Suspended") { <button class="btn btn-outline-primary btn-sm" name="action" value="reactivate" type="submit">Reactivate</button> }
+                                else { <button class="btn btn-outline-danger btn-sm" name="action" value="suspend" type="submit">Suspend</button> }
+                            </form>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <partial name="_Pager" model="(Shops.Page, Shops.TotalPages)" />
+    }
+}
+else
+{
+    @if (View == "admins")
+    {
+        <form class="card card-body mb-3" method="post" asp-page-handler="Admin" style="max-width: 640px" novalidate>
+            <h2 class="h6">Create another admin</h2>
+            <div class="row g-2">
+                <div class="col-md-4"><label class="form-label" asp-for="NewAdmin.FullName">Full name</label><input class="form-control" asp-for="NewAdmin.FullName" required /></div>
+                <div class="col-md-4"><label class="form-label" asp-for="NewAdmin.Email">Email</label><input class="form-control" asp-for="NewAdmin.Email" type="email" required /></div>
+                <div class="col-md-4"><label class="form-label" asp-for="NewAdmin.Phone">Mobile</label><input class="form-control" asp-for="NewAdmin.Phone" required /></div>
+            </div>
+            <button class="btn btn-primary mt-2 align-self-start" type="submit">Create admin</button>
+        </form>
+    }
+    @if (Users is null || Users.Items.Count == 0) { <p class="text-muted">No users found.</p> }
+    else
+    {
+        <table class="table align-middle table-cards">
+            <thead><tr><th scope="col">Name</th><th scope="col">Email</th><th scope="col">Role</th><th scope="col">Status</th><th scope="col">Joined</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+            <tbody>
+                @foreach (var u in Users.Items)
+                {
+                    <tr>
+                        <td data-label="Name">@u.FullName</td><td data-label="Email">@u.Email</td><td data-label="Role">@string.Join(", ", u.Roles)</td>
+                        <td data-label="Status"><span class="badge @Format.Badge(u.Status)">@u.Status</span></td><td data-label="Joined">@Format.Date(u.JoinedAt)</td>
+                        <td class="text-end">
+                            @if (u.Status != "Deleted")
+                            {
+                                <form class="d-flex flex-wrap gap-1 justify-content-end" method="post" asp-page-handler="User" asp-route-id="@u.Id" asp-route-view="@View">
+                                    <label class="visually-hidden" for="ur-@u.Id">Reason</label>
+                                    <input class="form-control form-control-sm w-auto" id="ur-@u.Id" name="reason" minlength="10" maxlength="500" placeholder="Reason (10 or more)" />
+                                    @if (u.Status == "Blocked") { <button class="btn btn-outline-primary btn-sm" name="action" value="unblock" type="submit">Unblock</button> }
+                                    else { <button class="btn btn-outline-danger btn-sm" name="action" value="block" type="submit">Block</button> }
+                                    <button class="btn btn-outline-danger btn-sm" name="action" value="delete" type="submit">Delete</button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <partial name="_Pager" model="(Users.Page, Users.TotalPages)" />
+    }
+}

@@ -1,0 +1,69 @@
+@page "/admin/products/{id:guid}"
+@{
+    ViewData["Title"] = "Product review";
+}
+@functions {
+    [FromRoute] public Guid Id { get; set; }
+    public SellerProductDetailDto? Product { get; private set; }
+
+    public async Task<IActionResult> OnGetAsync()
+    {
+        var result = await Api.GetAsync<SellerProductDetailDto>($"api/v1/admin/products/{Id}");
+        if (result.Status == 404) { return NotFound(); }
+        if (Failed(result)) { return RedirectToPage("/Products/Index"); }
+        Product = result.Data;
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostAsync(string action, string? reason)
+    {
+        var result = action switch
+        {
+            "approve" => await Api.PostAsync<Empty>($"api/v1/admin/products/{Id}/approve"),
+            "reject" => await Api.PostAsync<Empty>($"api/v1/admin/products/{Id}/reject", new { reason }),
+            "hide" => await Api.PostAsync<Empty>($"api/v1/admin/products/{Id}/hide", new { reason }),
+            "unhide" => await Api.PostAsync<Empty>($"api/v1/admin/products/{Id}/unhide", new { reason }),
+            "delete" => await Api.DeleteAsync<Empty>($"api/v1/admin/products/{Id}", new { reason }),
+            _ => null,
+        };
+        if (result is not null && !Failed(result)) { Success(Messages.Saved); }
+        return action == "delete" && result?.Ok == true ? RedirectToPage("/Products/Index") : RedirectToPage(new { id = Id });
+    }
+}
+
+@if (Product is null) { return; }
+<h1 class="h3">@Product.Name <span class="badge @Format.Badge(Product.Status)">@Product.Status</span></h1>
+<div class="row g-4">
+    <div class="col-lg-7">
+        <section class="card card-body mb-3">
+            <dl class="row mb-0">
+                <dt class="col-4">Price</dt><dd class="col-8">@Format.Tk(Product.Price)@(Product.DiscountPrice is { } d ? $" (discount {Format.Tk(d)})" : "")</dd>
+                <dt class="col-4">Brand</dt><dd class="col-8">@Product.Brand</dd>
+                <dt class="col-4">Stock</dt><dd class="col-8">@Product.Stock</dd>
+                <dt class="col-4">Description</dt><dd class="col-8" style="white-space: pre-line">@Product.Description</dd>
+            </dl>
+        </section>
+        @if (Product.Variants.Count > 0)
+        {
+            <section class="card card-body mb-3"><h2 class="h6">Variants</h2>
+                <table class="table table-sm mb-0"><thead><tr><th scope="col">Option</th><th scope="col">SKU</th><th scope="col">Price</th><th scope="col">Stock</th></tr></thead>
+                    <tbody>@foreach (var v in Product.Variants.Where(v => v.IsActive)) { <tr><td>@v.OptionText</td><td>@v.Sku</td><td>@Format.Tk(v.Price)</td><td>@v.Stock</td></tr> }</tbody></table></section>
+        }
+        <section class="card card-body"><h2 class="h6">Images</h2>
+            <div class="d-flex flex-wrap gap-2">@foreach (var i in Product.Images) { <img class="rounded border" src="@Format.Media(i.Url)" alt="Image @i.SortOrder" width="140" height="140" loading="lazy" /> }</div></section>
+    </div>
+    <div class="col-lg-5">
+        <form class="card card-body" method="post">
+            <h2 class="h5">Decision</h2>
+            <label class="form-label" for="reason">Reason (10 to 500 characters, needed to reject, hide or delete)</label>
+            <textarea class="form-control mb-3" id="reason" name="reason" rows="3" maxlength="500"></textarea>
+            <div class="d-flex flex-wrap gap-2">
+                @if (Product.Status == "Pending") { <button class="btn btn-primary" name="action" value="approve" type="submit">Approve</button><button class="btn btn-outline-danger" name="action" value="reject" type="submit">Reject</button> }
+                @if (Product.Status == "Active") { <button class="btn btn-outline-secondary" name="action" value="hide" type="submit">Hide</button> }
+                @if (Product.Status == "Hidden") { <button class="btn btn-outline-secondary" name="action" value="unhide" type="submit">Unhide</button> }
+                <button class="btn btn-outline-danger" name="action" value="delete" type="submit">Delete</button>
+            </div>
+            @if (Product.HiddenByAdmin) { <p class="small text-muted mt-2 mb-0">Hidden by an admin: the seller cannot unhide it.</p> }
+        </form>
+    </div>
+</div>

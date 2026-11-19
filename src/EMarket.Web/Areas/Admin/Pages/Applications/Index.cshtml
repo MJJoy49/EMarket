@@ -1,0 +1,46 @@
+@page "/admin/applications"
+@using EMarket.Shared.Dtos.Sellers
+@using EMarket.Shared.Results
+@{
+    ViewData["Title"] = "Seller applications";
+}
+@functions {
+    public PagedResult<SellerApplicationDto>? Applications { get; private set; }
+    public string Current => Request.Query["status"].ToString();
+
+    public async Task OnGetAsync()
+    {
+        var result = await Api.GetAsync<PagedResult<SellerApplicationDto>>(
+            $"api/v1/admin/seller-applications?status={Uri.EscapeDataString(Current)}&search={Uri.EscapeDataString(Request.Query["search"].ToString())}&page={Math.Max(1, int.TryParse(Request.Query["page"], out var p) ? p : 1)}");
+        if (!Failed(result)) { Applications = result.Data; }
+    }
+}
+
+<h1 class="h3">Seller applications</h1>
+<ul class="nav nav-pills mb-3" aria-label="Application status">
+    @foreach (var (value, text) in new[] { ("Pending", "Pending"), ("Approved", "Approved"), ("Rejected", "Rejected"), ("", "All") })
+    {
+        <li class="nav-item"><a class="nav-link @(Current == value ? "active" : "")" asp-page="/Applications/Index" asp-route-status="@value">@text</a></li>
+    }
+</ul>
+<form class="d-flex gap-2 mb-3" method="get" role="search">
+    <input type="hidden" name="status" value="@Current" />
+    <label class="visually-hidden" for="search">Search by applicant or shop</label>
+    <input class="form-control" id="search" name="search" value="@Request.Query["search"]" placeholder="Search by applicant or shop" />
+    <button class="btn btn-outline-primary" type="submit">Search</button>
+</form>
+@if (Applications is null || Applications.Items.Count == 0) { <p class="text-muted">No applications here.</p> return; }
+<table class="table align-middle table-cards">
+    <thead><tr><th scope="col">Applicant</th><th scope="col">Shop</th><th scope="col">Submitted</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+    <tbody>
+        @foreach (var a in Applications.Items)
+        {
+            <tr>
+                <td data-label="Applicant">@a.ApplicantName<div class="small text-muted">@a.ApplicantEmail</div></td><td data-label="Shop">@a.ShopName</td>
+                <td data-label="Submitted">@Format.Date(a.SubmittedAt)</td><td data-label="Status"><span class="badge @Format.Badge(a.Status)">@a.Status</span></td>
+                <td class="text-end"><a class="btn btn-outline-primary btn-sm" asp-page="/Applications/Review" asp-route-id="@a.Id">Review</a></td>
+            </tr>
+        }
+    </tbody>
+</table>
+<partial name="_Pager" model="(Applications.Page, Applications.TotalPages)" />

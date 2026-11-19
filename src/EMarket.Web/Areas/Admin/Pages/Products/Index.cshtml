@@ -1,0 +1,78 @@
+@page "/admin/products"
+@using EMarket.Shared.Dtos.AfterSale
+@using EMarket.Shared.Results
+@{
+    ViewData["Title"] = "Products";
+}
+@functions {
+    public PagedResult<ApprovalQueueItemDto>? Products { get; private set; }
+    public PagedResult<ReviewDto>? Reviews { get; private set; }
+    public string View => Request.Query["view"].ToString() == "reviews" ? "reviews" : "products";
+    public string Current => Request.Query["status"].ToString();
+
+    public async Task OnGetAsync()
+    {
+        var page = Math.Max(1, int.TryParse(Request.Query["page"], out var p) ? p : 1);
+        if (View == "reviews")
+        {
+            Reviews = (await Api.GetAsync<PagedResult<ReviewDto>>($"api/v1/admin/reviews?reportedOnly={Request.Query["reportedOnly"].ToString().StartsWith("true").ToString().ToLower()}&page={page}")).Data;
+            return;
+        }
+
+        var result = await Api.GetAsync<PagedResult<ApprovalQueueItemDto>>($"api/v1/admin/products?status={Uri.EscapeDataString(Current)}&page={page}");
+        if (!Failed(result)) { Products = result.Data; }
+    }
+
+    public async Task<IActionResult> OnPostReviewAsync(Guid id, bool hide, string reason)
+    {
+        var result = await Api.PostAsync<Empty>($"api/v1/admin/reviews/{id}/{(hide ? "hide" : "show")}", new { reason });
+        if (!Failed(result)) { Success(Messages.Saved); }
+        return RedirectToPage(new { view = "reviews" });
+    }
+}
+
+<h1 class="h3">Products</h1>
+<ul class="nav nav-pills mb-3 flex-wrap" aria-label="Product groups">
+    <li class="nav-item"><a class="nav-link @(View == "products" && Current == "Pending" ? "active" : "")" asp-page="/Products/Index" asp-route-status="Pending">Pending approval</a></li>
+    <li class="nav-item"><a class="nav-link @(View == "products" && Current == "" ? "active" : "")" asp-page="/Products/Index">All products</a></li>
+    <li class="nav-item"><a class="nav-link @(View == "reviews" ? "active" : "")" asp-page="/Products/Index" asp-route-view="reviews">Reviews</a></li>
+</ul>
+
+@if (View == "reviews")
+{
+    <form class="form-check mb-3" method="get"><input type="hidden" name="view" value="reviews" />
+        <input class="form-check-input" type="checkbox" id="rep" name="reportedOnly" value="true" checked="@Request.Query["reportedOnly"].ToString().StartsWith("true")" data-autosubmit /><label class="form-check-label" for="rep">Reported reviews only</label></form>
+    @if (Reviews is null || Reviews.Items.Count == 0) { <p class="text-muted">No reviews here.</p> return; }
+    @foreach (var r in Reviews.Items)
+    {
+        <article class="card card-body mb-2">
+            <div><span class="rating" aria-label="@r.Rating out of 5 stars">@(new string('★', r.Rating))@(new string('☆', 5 - r.Rating))</span> <strong>@r.ReviewerName</strong> on @r.ProductName
+                <span class="badge @Format.Badge(r.Status)">@r.Status</span>@if (r.OpenReports > 0) { <span class="badge text-bg-warning">@r.OpenReports reports</span> }</div>
+            @if (!string.IsNullOrWhiteSpace(r.Comment)) { <p class="mb-1">@r.Comment</p> }
+            <form class="d-flex gap-2" method="post" asp-page-handler="Review" asp-route-id="@r.Id" asp-route-hide="@(r.Status == "Visible")">
+                <label class="visually-hidden" for="rr-@r.Id">Reason</label>
+                <input class="form-control" id="rr-@r.Id" name="reason" minlength="10" maxlength="500" required placeholder="Reason (10 characters or more)" />
+                <button class="btn @(r.Status == "Visible" ? "btn-outline-danger" : "btn-outline-primary")" type="submit">@(r.Status == "Visible" ? "Hide" : "Show")</button>
+            </form>
+        </article>
+    }
+    <partial name="_Pager" model="(Reviews.Page, Reviews.TotalPages)" />
+    return;
+}
+
+@if (Products is null || Products.Items.Count == 0) { <p class="text-muted">No products here.</p> return; }
+<table class="table align-middle table-cards">
+    <thead><tr><th scope="col">Product</th><th scope="col">Shop</th><th scope="col">Category</th><th scope="col">Price</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+    <tbody>
+        @foreach (var p in Products.Items)
+        {
+            <tr>
+                <td data-label="Product"><div class="d-flex align-items-center gap-2">@if (p.ThumbUrl is not null) { <img src="@Format.Media(p.ThumbUrl)" alt="" width="40" height="40" class="rounded" loading="lazy" /> }@p.Name</div></td>
+                <td data-label="Shop">@p.ShopName</td><td data-label="Category">@p.CategoryName</td><td data-label="Price">@Format.Tk(p.Price)</td>
+                <td data-label="Status"><span class="badge @Format.Badge(p.Status)">@p.Status</span></td>
+                <td class="text-end"><a class="btn btn-outline-primary btn-sm" asp-page="/Products/Review" asp-route-id="@p.Id">Open</a></td>
+            </tr>
+        }
+    </tbody>
+</table>
+<partial name="_Pager" model="(Products.Page, Products.TotalPages)" />

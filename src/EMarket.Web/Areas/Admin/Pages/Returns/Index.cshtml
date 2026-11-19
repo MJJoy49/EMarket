@@ -1,0 +1,55 @@
+@page "/admin/returns"
+@using EMarket.Shared.Dtos.AfterSale
+@using EMarket.Shared.Results
+@{
+    ViewData["Title"] = "Return requests";
+}
+@functions {
+    public PagedResult<ReturnDto>? Requests { get; private set; }
+    public string Current => Request.Query["status"].ToString();
+
+    public async Task OnGetAsync()
+    {
+        var result = await Api.GetAsync<PagedResult<ReturnDto>>($"api/v1/admin/returns?status={Uri.EscapeDataString(Current)}&page={Math.Max(1, int.TryParse(Request.Query["page"], out var p) ? p : 1)}");
+        if (!Failed(result)) { Requests = result.Data; }
+    }
+
+    public async Task<IActionResult> OnPostDecideAsync(Guid id, bool approve, string? reason)
+    {
+        if (!Failed(await Api.PostAsync<Empty>($"api/v1/admin/returns/{id}/decision", new { approve, reason }))) { Success("The decision is final and was sent to the buyer and the seller."); }
+        return RedirectToPage(new { status = Current });
+    }
+}
+
+<h1 class="h3">Return requests</h1>
+<ul class="nav nav-pills mb-3 flex-wrap" aria-label="Return status">
+    @foreach (var (value, text) in new[] { ("", "Open for the admin"), ("Approved", "Approved"), ("Rejected", "Rejected"), ("Refunded", "Refunded") })
+    {
+        <li class="nav-item"><a class="nav-link @(Current == value ? "active" : "")" asp-page="/Returns/Index" asp-route-status="@value">@text</a></li>
+    }
+</ul>
+<p class="text-muted small">Open requests are the ones the buyer sent to you after a rejection, and those the seller left for 3 days.</p>
+@if (Requests is null || Requests.Items.Count == 0) { <p class="text-muted">No requests here.</p> return; }
+@foreach (var r in Requests.Items)
+{
+    <article class="card card-body mb-3">
+        <div class="d-flex flex-wrap justify-content-between gap-2">
+            <h2 class="h6 mb-0">Order @r.OrderNumber &middot; @r.BuyerName &middot; @r.ShopName</h2>
+            <span><span class="badge @Format.Badge(r.Status)">@Format.Status(r.Status)</span> @if (r.Escalated) { <span class="badge text-bg-warning">Sent by buyer</span> } <span class="text-muted small">@Format.Date(r.CreatedAt)</span></span>
+        </div>
+        <p class="mb-1"><strong>@Format.Status(r.Reason)</strong>@(string.IsNullOrWhiteSpace(r.Description) ? "" : $": {r.Description}")</p>
+        <ul class="mb-1">@foreach (var l in r.Items) { <li>@l.Quantity &times; @l.ProductName</li> }</ul>
+        <p class="mb-2">Refund if approved: <strong>@Format.Tk(r.RefundAmount)</strong> (@(r.RefundMethod == "StoreCredit" ? "store credit" : "original method"))@if (r.RejectionReason is not null) { <span class="text-danger"> &middot; Seller said: @r.RejectionReason</span> }</p>
+        <div class="d-flex flex-wrap gap-1 mb-2">@for (var i = 0; i < r.PhotoUrls.Count; i++) { <img class="rounded border" src="/files/returns/@r.Id/@i" alt="Photo @(i + 1)" width="72" height="72" loading="lazy" /> }</div>
+        @if (r.AllowedActions.Contains("Approve"))
+        {
+            <form class="d-flex flex-wrap gap-2" method="post" asp-page-handler="Decide" asp-route-id="@r.Id">
+                <label class="visually-hidden" for="c-@r.Id">Decision comment</label>
+                <input class="form-control w-auto flex-grow-1" id="c-@r.Id" name="reason" minlength="10" maxlength="500" placeholder="Comment (10 characters or more, needed to reject)" />
+                <button class="btn btn-primary" name="approve" value="true" type="submit">Approve</button>
+                <button class="btn btn-outline-danger" name="approve" value="false" type="submit">Reject</button>
+            </form>
+        }
+    </article>
+}
+<partial name="_Pager" model="(Requests.Page, Requests.TotalPages)" />

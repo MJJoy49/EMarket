@@ -1,0 +1,69 @@
+@page "/admin/applications/{id:guid}"
+@using EMarket.Shared.Dtos.Sellers
+@{
+    ViewData["Title"] = "Application review";
+}
+@functions {
+    [FromRoute] public Guid Id { get; set; }
+    public SellerApplicationDto? Application { get; private set; }
+
+    public async Task<IActionResult> OnGetAsync()
+    {
+        // Opening the application also logs that the NID was viewed (BR-43).
+        var result = await Api.GetAsync<SellerApplicationDto>($"api/v1/admin/seller-applications/{Id}");
+        if (result.Status == 404) { return NotFound(); }
+        if (Failed(result)) { return RedirectToPage("/Applications/Index"); }
+        Application = result.Data;
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostAsync(bool approve, string? reason)
+    {
+        var result = await Api.PostAsync<Empty>($"api/v1/admin/seller-applications/{Id}/decision", new { approve, reason });
+        if (!result.Ok) { Problem(result.Message); return RedirectToPage(new { id = Id }); }
+        Success(approve ? "Approved. The user is now a seller." : "Rejected. The applicant was told the reason.");
+        return RedirectToPage("/Applications/Index", new { status = "Pending" });
+    }
+}
+
+@if (Application is null) { return; }
+<h1 class="h3">Application <span class="badge @Format.Badge(Application.Status)">@Application.Status</span></h1>
+<div class="row g-4">
+    <div class="col-lg-6">
+        <section class="card card-body mb-3">
+            <h2 class="h5">Applicant and shop</h2>
+            <dl class="row mb-0">
+                <dt class="col-5">Applicant</dt><dd class="col-7">@Application.ApplicantName<br /><span class="text-muted small">@Application.ApplicantEmail</span></dd>
+                <dt class="col-5">Shop</dt><dd class="col-7">@Application.ShopName</dd>
+                <dt class="col-5">Business type</dt><dd class="col-7">@Application.BusinessType</dd>
+                <dt class="col-5">Description</dt><dd class="col-7">@Application.ShopDescription</dd>
+                <dt class="col-5">NID number</dt><dd class="col-7">@Application.NidNumber</dd>
+                <dt class="col-5">Payout</dt><dd class="col-7">@Application.PayoutMethod: @Application.PayoutAccount</dd>
+                <dt class="col-5">Submitted</dt><dd class="col-7">@Format.DateTime(Application.SubmittedAt)</dd>
+            </dl>
+        </section>
+        <section class="card card-body" aria-labelledby="docs">
+            <h2 class="h5" id="docs">Documents (visible to admins only)</h2>
+            <div class="d-flex flex-wrap gap-3">
+                <figure class="mb-0"><img class="img-fluid rounded border" style="max-width:240px" src="/files/nid/@Application.Id/nid-front" alt="NID front" /><figcaption class="small">NID front</figcaption></figure>
+                <figure class="mb-0"><img class="img-fluid rounded border" style="max-width:240px" src="/files/nid/@Application.Id/nid-back" alt="NID back" /><figcaption class="small">NID back</figcaption></figure>
+                @if (Application.HasTradeLicence) { <figure class="mb-0"><img class="img-fluid rounded border" style="max-width:240px" src="/files/nid/@Application.Id/trade-licence" alt="Trade licence" /><figcaption class="small">Trade licence</figcaption></figure> }
+            </div>
+        </section>
+    </div>
+    <div class="col-lg-6">
+        @if (Application.Status == "Pending")
+        {
+            <form class="card card-body" method="post">
+                <h2 class="h5">Decision</h2>
+                <label class="form-label" for="reason">Comment (required to reject, 10 to 500 characters)</label>
+                <textarea class="form-control mb-3" id="reason" name="reason" rows="4" maxlength="500"></textarea>
+                <div class="d-flex flex-wrap gap-2">
+                    <button class="btn btn-primary" type="submit" name="approve" value="true">Approve</button>
+                    <button class="btn btn-outline-danger" type="submit" name="approve" value="false">Reject</button>
+                </div>
+            </form>
+        }
+        else if (Application.RejectionReason is not null) { <div class="alert alert-danger">Rejected: @Application.RejectionReason</div> }
+    </div>
+</div>

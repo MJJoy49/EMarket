@@ -1,7 +1,7 @@
 using EMarket.DAL.Data;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
-namespace EMarket.Api.Infrastructure;
+namespace EMarket.BLL.Common;
 
 /// <summary>The ready endpoint fails with 503 when the database cannot be reached (NFR-14).</summary>
 public sealed class DatabaseHealthCheck(AppDbContext db) : IHealthCheck

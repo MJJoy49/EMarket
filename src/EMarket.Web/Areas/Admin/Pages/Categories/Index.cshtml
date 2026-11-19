@@ -1,0 +1,78 @@
+@page "/admin/categories"
+@{
+    ViewData["Title"] = "Categories";
+}
+@functions {
+    [BindProperty] public SaveCategoryRequest Input { get; set; } = new();
+    [BindProperty(SupportsGet = true)] public Guid? Edit { get; set; }
+    public IReadOnlyList<CategoryDto> Tree { get; private set; } = [];
+
+    public async Task OnGetAsync()
+    {
+        Tree = (await Api.GetAsync<List<CategoryDto>>("api/v1/admin/categories")).Data ?? [];
+        var current = Tree.Concat(Tree.SelectMany(c => c.Children)).FirstOrDefault(c => c.Id == Edit);
+        if (current is not null) { Input = new SaveCategoryRequest { Name = current.Name, ParentId = current.ParentId, SortOrder = current.SortOrder, IsActive = current.IsActive }; }
+    }
+
+    public async Task<IActionResult> OnPostSaveAsync()
+    {
+        if (!ModelState.IsValid) { await OnGetAsync(); return Page(); }
+        var result = Edit is { } id
+            ? await Api.PutAsync<Empty>($"api/v1/admin/categories/{id}", Input)
+            : await Api.PostAsync<Empty>("api/v1/admin/categories", Input);
+        if (!result.Ok) { await OnGetAsync(); AddErrors(result); return Page(); }
+        Success(Messages.Saved);
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostDeleteAsync(Guid id)
+    {
+        if (!Failed(await Api.DeleteAsync<Empty>($"api/v1/admin/categories/{id}"))) { Success(Messages.Saved); }
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostToggleAsync(Guid id, string name, Guid? parentId, int sortOrder, bool active)
+    {
+        if (!Failed(await Api.PutAsync<Empty>($"api/v1/admin/categories/{id}", new { name, parentId, sortOrder, isActive = active }))) { Success(Messages.Saved); }
+        return RedirectToPage();
+    }
+}
+
+<h1 class="h3">Categories</h1>
+<div class="row g-4">
+    <div class="col-lg-7">
+        @if (Tree.Count == 0) { <p class="text-muted">No categories yet.</p> }
+        <ul class="list-group">
+            @foreach (var main in Tree)
+            {
+                <li class="list-group-item">
+                    @foreach (var node in new[] { (main, 0) }.Concat(main.Children.Select(c => (c, 1))))
+                    {
+                        var (c, level) = node;
+                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 @(level == 1 ? "ps-4 mt-2" : "")">
+                            <span class="@(c.IsActive ? "" : "text-muted text-decoration-line-through")">@c.Name <span class="badge text-bg-light">@(level == 0 ? "Main" : "Sub")</span>@if (!c.IsActive) { <span class="badge text-bg-secondary">Disabled</span> }</span>
+                            <span class="d-flex gap-1">
+                                <a class="btn btn-outline-primary btn-sm" asp-page="/Categories/Index" asp-route-edit="@c.Id">Edit</a>
+                                <form method="post" asp-page-handler="Toggle" asp-route-id="@c.Id" asp-route-name="@c.Name" asp-route-parentId="@c.ParentId" asp-route-sortOrder="@c.SortOrder" asp-route-active="@(!c.IsActive)">
+                                    <button class="btn btn-outline-secondary btn-sm" type="submit">@(c.IsActive ? "Disable" : "Enable")</button></form>
+                                <form method="post" asp-page-handler="Delete" asp-route-id="@c.Id" data-confirm="Delete this category? This only works when it has no products and no sub-categories."><button class="btn btn-outline-danger btn-sm" type="submit">Delete</button></form>
+                            </span>
+                        </div>
+                    }
+                </li>
+            }
+        </ul>
+    </div>
+    <div class="col-lg-5">
+        <form class="card card-body" method="post" asp-page-handler="Save" asp-route-edit="@Edit" novalidate>
+            <h2 class="h5">@(Edit is null ? "Add category" : "Edit category")</h2>
+            <div asp-validation-summary="All" class="text-danger mb-2" role="alert"></div>
+            <div class="mb-3"><label class="form-label" asp-for="Input.Name">Name <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.Name" minlength="2" maxlength="60" required /></div>
+            <div class="mb-3"><label class="form-label" asp-for="Input.ParentId">Parent (two levels at most)</label>
+                <select class="form-select" asp-for="Input.ParentId"><option value="">None (main category)</option>@foreach (var main in Tree.Where(t => t.Id != Edit)) { <option value="@main.Id" selected="@(Input.ParentId == main.Id)">@main.Name</option> }</select></div>
+            <div class="mb-3"><label class="form-label" asp-for="Input.SortOrder">Display order</label><input class="form-control" asp-for="Input.SortOrder" type="number" min="0" /></div>
+            <div class="form-check mb-3"><input class="form-check-input" asp-for="Input.IsActive" /><label class="form-check-label" asp-for="Input.IsActive">Active</label></div>
+            <div class="d-flex gap-2"><button class="btn btn-primary" type="submit">Save category</button>@if (Edit is not null) { <a class="btn btn-outline-secondary" asp-page="/Categories/Index">Cancel</a> }</div>
+        </form>
+    </div>
+</div>

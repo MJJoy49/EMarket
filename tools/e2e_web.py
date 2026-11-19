@@ -26,6 +26,7 @@ def sql(query, db="master"):
 
 
 def check(name, ok, detail=""):
+    ok = bool(ok)
     results.append(ok)
     print(("PASS " if ok else "FAIL ") + name + (f"  [{str(detail)[:300]}]" if detail and not ok else ""))
 

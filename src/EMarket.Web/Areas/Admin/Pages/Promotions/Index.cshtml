@@ -1,0 +1,161 @@
+@page "/admin/promotions"
+@using EMarket.Shared.Dtos.Admin
+@{
+    ViewData["Title"] = "Coupons and banners";
+}
+@functions {
+    [BindProperty] public SaveCouponRequest Coupon { get; set; } = new() { StartsAt = DateTime.UtcNow.Date, ExpiresAt = DateTime.UtcNow.Date.AddDays(30) };
+    [BindProperty] public SaveBannerRequest Banner { get; set; } = new();
+    [BindProperty(SupportsGet = true)] public Guid? EditCoupon { get; set; }
+    public IReadOnlyList<CouponDto> Coupons { get; private set; } = [];
+    public IReadOnlyList<BannerAdminDto> Banners { get; private set; } = [];
+    public string View => Request.Query["view"].ToString() == "banners" ? "banners" : "coupons";
+
+    public async Task OnGetAsync()
+    {
+        Coupons = (await Api.GetAsync<List<CouponDto>>($"api/v1/admin/coupons?state={Uri.EscapeDataString(Request.Query["state"].ToString())}")).Data ?? [];
+        Banners = (await Api.GetAsync<List<BannerAdminDto>>("api/v1/admin/banners")).Data ?? [];
+        if (Coupons.FirstOrDefault(c => c.Id == EditCoupon) is { } c)
+        {
+            Coupon = new SaveCouponRequest { Code = c.Code, DiscountType = c.DiscountType, DiscountValue = c.DiscountValue, MaxDiscount = c.MaxDiscount, MinOrderAmount = c.MinOrderAmount, StartsAt = c.StartsAt, ExpiresAt = c.ExpiresAt, UsageLimit = c.UsageLimit, PerUserLimit = c.PerUserLimit, IsActive = c.IsActive };
+        }
+    }
+
+    public async Task<IActionResult> OnPostCouponAsync()
+    {
+        ModelState.Remove("Banner");
+        if (!ModelState.IsValid) { await OnGetAsync(); return Page(); }
+        var result = EditCoupon is { } id ? await Api.PutAsync<Empty>($"api/v1/admin/coupons/{id}", Coupon) : await Api.PostAsync<Empty>("api/v1/admin/coupons", Coupon);
+        if (!result.Ok) { await OnGetAsync(); AddErrors(result, "Coupon"); return Page(); }
+        Success(Messages.Saved);
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostCouponActionAsync(Guid id, string action)
+    {
+        var coupon = (await Api.GetAsync<List<CouponDto>>("api/v1/admin/coupons")).Data?.FirstOrDefault(c => c.Id == id);
+        if (coupon is null) { return RedirectToPage(); }
+        ApiResult<Empty> result = action == "delete"
+            ? await Api.DeleteAsync<Empty>($"api/v1/admin/coupons/{id}")
+            : await Api.PutAsync<Empty>($"api/v1/admin/coupons/{id}", new { coupon.Code, coupon.DiscountType, coupon.DiscountValue, coupon.MaxDiscount, coupon.MinOrderAmount, coupon.StartsAt, coupon.ExpiresAt, coupon.UsageLimit, coupon.PerUserLimit, IsActive = action == "enable" });
+        if (!Failed(result)) { Success(Messages.Saved); }
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostBannerAsync(IFormFile? image)
+    {
+        ModelState.Remove("Coupon");
+        if (!ModelState.IsValid) { await OnGetAsync(); return Page(); }
+        var files = new List<FormFilePart>();
+        if (image is { Length: > 0 })
+        {
+            using var memory = new MemoryStream();
+            await image.CopyToAsync(memory);
+            files.Add(new FormFilePart("image", image.FileName, memory.ToArray()));
+        }
+
+        var fields = new Dictionary<string, string?>
+        {
+            ["Title"] = Banner.Title, ["LinkUrl"] = Banner.LinkUrl, ["SortOrder"] = Banner.SortOrder.ToString(),
+            ["StartsAt"] = Banner.StartsAt?.ToString("o"), ["EndsAt"] = Banner.EndsAt?.ToString("o"), ["IsActive"] = Banner.IsActive ? "true" : "false",
+        };
+        var result = await Api.PostFormAsync<Empty>("api/v1/admin/banners", fields, files);
+        if (!result.Ok) { await OnGetAsync(); AddErrors(result, "Banner"); return Page(); }
+        Success(Messages.Saved);
+        return RedirectToPage(new { view = "banners" });
+    }
+
+    public async Task<IActionResult> OnPostDeleteBannerAsync(Guid id)
+    {
+        if (!Failed(await Api.DeleteAsync<Empty>($"api/v1/admin/banners/{id}"))) { Success(Messages.Saved); }
+        return RedirectToPage(new { view = "banners" });
+    }
+}
+
+<h1 class="h3">Coupons and banners</h1>
+<ul class="nav nav-pills mb-3" aria-label="Promotion type">
+    <li class="nav-item"><a class="nav-link @(View == "coupons" ? "active" : "")" asp-page="/Promotions/Index">Coupons</a></li>
+    <li class="nav-item"><a class="nav-link @(View == "banners" ? "active" : "")" asp-page="/Promotions/Index" asp-route-view="banners">Banners</a></li>
+</ul>
+
+@if (View == "coupons")
+{
+    <div class="row g-4">
+        <div class="col-lg-7">
+            @if (Coupons.Count == 0) { <p class="text-muted">No coupons yet.</p> }
+            else
+            {
+                <table class="table align-middle table-cards">
+                    <thead><tr><th scope="col">Code</th><th scope="col">Value</th><th scope="col">Used</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+                    <tbody>
+                        @foreach (var c in Coupons)
+                        {
+                            <tr>
+                                <td data-label="Code"><strong>@c.Code</strong><div class="small text-muted">@Format.Date(c.StartsAt) to @Format.Date(c.ExpiresAt)</div></td>
+                                <td data-label="Value">@(c.DiscountType == "Percent" ? $"{c.DiscountValue:0.##}%" : Format.Tk(c.DiscountValue))</td>
+                                <td data-label="Used">@c.UsedCount@(c.UsageLimit is { } l ? $" / {l}" : "")</td>
+                                <td data-label="Status"><span class="badge @(c.State == "Active" ? "text-bg-success" : "text-bg-secondary")">@c.State</span></td>
+                                <td class="text-end"><form class="d-flex flex-wrap gap-1 justify-content-end" method="post" asp-page-handler="CouponAction" asp-route-id="@c.Id">
+                                    <a class="btn btn-outline-primary btn-sm" asp-page="/Promotions/Index" asp-route-editCoupon="@c.Id">Edit</a>
+                                    <button class="btn btn-outline-secondary btn-sm" name="action" value="@(c.IsActive ? "disable" : "enable")" type="submit">@(c.IsActive ? "Disable" : "Enable")</button>
+                                    @if (c.UsedCount == 0) { <button class="btn btn-outline-danger btn-sm" name="action" value="delete" type="submit">Delete</button> }
+                                </form></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+        <div class="col-lg-5">
+            <form class="card card-body" method="post" asp-page-handler="Coupon" asp-route-editCoupon="@EditCoupon" novalidate>
+                <h2 class="h5">@(EditCoupon is null ? "New coupon" : "Edit coupon")</h2>
+                <div asp-validation-summary="All" class="text-danger mb-2" role="alert"></div>
+                <div class="mb-2"><label class="form-label" asp-for="Coupon.Code">Code (4 to 20 letters or digits) <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Coupon.Code" pattern="[A-Za-z0-9]{4,20}" required /></div>
+                <div class="row g-2 mb-2">
+                    <div class="col-6"><label class="form-label" asp-for="Coupon.DiscountType">Type</label><select class="form-select" asp-for="Coupon.DiscountType"><option>Percent</option><option>Fixed</option></select></div>
+                    <div class="col-6"><label class="form-label" asp-for="Coupon.DiscountValue">Value</label><input class="form-control" asp-for="Coupon.DiscountValue" type="number" min="1" step="0.01" required /></div>
+                    <div class="col-6"><label class="form-label" asp-for="Coupon.MaxDiscount">Max discount (percent coupons)</label><input class="form-control" asp-for="Coupon.MaxDiscount" type="number" min="1" step="0.01" /></div>
+                    <div class="col-6"><label class="form-label" asp-for="Coupon.MinOrderAmount">Minimum cart (Tk)</label><input class="form-control" asp-for="Coupon.MinOrderAmount" type="number" min="0" step="0.01" /></div>
+                    <div class="col-6"><label class="form-label" asp-for="Coupon.StartsAt">Starts</label><input class="form-control" asp-for="Coupon.StartsAt" type="datetime-local" required /></div>
+                    <div class="col-6"><label class="form-label" asp-for="Coupon.ExpiresAt">Ends</label><input class="form-control" asp-for="Coupon.ExpiresAt" type="datetime-local" required /></div>
+                    <div class="col-6"><label class="form-label" asp-for="Coupon.UsageLimit">Total uses</label><input class="form-control" asp-for="Coupon.UsageLimit" type="number" min="1" /></div>
+                    <div class="col-6"><label class="form-label" asp-for="Coupon.PerUserLimit">Uses per buyer</label><input class="form-control" asp-for="Coupon.PerUserLimit" type="number" min="1" /></div>
+                </div>
+                <div class="form-check mb-3"><input class="form-check-input" asp-for="Coupon.IsActive" /><label class="form-check-label" asp-for="Coupon.IsActive">Active</label></div>
+                <button class="btn btn-primary align-self-start" type="submit">Save coupon</button>
+            </form>
+        </div>
+    </div>
+}
+else
+{
+    <div class="row g-4">
+        <div class="col-lg-7">
+            @if (Banners.Count == 0) { <p class="text-muted">No banners yet.</p> }
+            @foreach (var b in Banners)
+            {
+                <article class="card card-body mb-2 d-flex flex-row gap-3 align-items-center">
+                    <img class="rounded" src="@Format.Media(b.ImageUrl)" alt="" width="120" height="60" loading="lazy" />
+                    <div class="flex-grow-1"><strong>@b.Title</strong> <span class="badge @(b.IsActive ? "text-bg-success" : "text-bg-secondary")">@(b.IsActive ? "Active" : "Off")</span><div class="small text-muted">Order @b.SortOrder@(b.EndsAt is { } e ? $" &middot; until {Format.Date(e)}" : "")</div></div>
+                    <form method="post" asp-page-handler="DeleteBanner" asp-route-id="@b.Id" data-confirm="Delete this banner?"><button class="btn btn-outline-danger btn-sm" type="submit">Delete</button></form>
+                </article>
+            }
+        </div>
+        <div class="col-lg-5">
+            <form class="card card-body" method="post" asp-page-handler="Banner" enctype="multipart/form-data" novalidate>
+                <h2 class="h5">New banner</h2>
+                <div asp-validation-summary="All" class="text-danger mb-2" role="alert"></div>
+                <div class="mb-2"><label class="form-label" for="image">Image (JPG or PNG, up to 2 MB) <span aria-hidden="true">*</span></label><input class="form-control" id="image" name="image" type="file" accept="image/jpeg,image/png" required /></div>
+                <div class="mb-2"><label class="form-label" asp-for="Banner.Title">Title <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Banner.Title" maxlength="80" required /></div>
+                <div class="mb-2"><label class="form-label" asp-for="Banner.LinkUrl">Link (starts with / or https://)</label><input class="form-control" asp-for="Banner.LinkUrl" /></div>
+                <div class="row g-2 mb-2">
+                    <div class="col-4"><label class="form-label" asp-for="Banner.SortOrder">Order</label><input class="form-control" asp-for="Banner.SortOrder" type="number" min="0" /></div>
+                    <div class="col-4"><label class="form-label" asp-for="Banner.StartsAt">Start</label><input class="form-control" asp-for="Banner.StartsAt" type="datetime-local" /></div>
+                    <div class="col-4"><label class="form-label" asp-for="Banner.EndsAt">End</label><input class="form-control" asp-for="Banner.EndsAt" type="datetime-local" /></div>
+                </div>
+                <div class="form-check mb-3"><input class="form-check-input" asp-for="Banner.IsActive" /><label class="form-check-label" asp-for="Banner.IsActive">Active</label></div>
+                <button class="btn btn-primary align-self-start" type="submit">Save banner</button>
+            </form>
+        </div>
+    </div>
+}

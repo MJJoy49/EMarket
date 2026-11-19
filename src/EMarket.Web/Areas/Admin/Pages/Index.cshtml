@@ -1,0 +1,38 @@
+@page "/admin"
+@using EMarket.Shared.Dtos.Admin
+@{
+    ViewData["Title"] = "Admin dashboard";
+}
+@functions {
+    public AdminDashboardDto? Dashboard { get; private set; }
+
+    public async Task OnGetAsync()
+    {
+        var result = await Api.GetAsync<AdminDashboardDto>("api/v1/admin/dashboard");
+        if (!Failed(result)) { Dashboard = result.Data; }
+    }
+}
+
+<h1 class="h3">Dashboard</h1>
+@if (Dashboard is null) { <p class="text-muted">The dashboard is not available right now.</p> return; }
+
+<div class="row g-3 mb-3">
+    @foreach (var (label, value, link) in new (string, string, string)[]
+    {
+        ("Users", Dashboard.Users.ToString(), "/admin/users"), ("Sellers", Dashboard.Sellers.ToString(), "/admin/users?view=shops"),
+        ("Orders today", Dashboard.OrdersToday.ToString(), "/admin/orders"), ("Sales today", Format.Tk(Dashboard.SalesToday), "/admin/reports"),
+        ("New users today", Dashboard.NewUsersToday.ToString(), "/admin/users"), ("Applications", Dashboard.PendingApplications.ToString(), "/admin/applications?status=Pending"),
+        ("Products to approve", Dashboard.PendingProducts.ToString(), "/admin/products?status=Pending"), ("Returns to decide", Dashboard.OpenReturns.ToString(), "/admin/returns"),
+        ("Payout requests", Dashboard.OpenPayouts.ToString(), "/admin/payouts?status=Requested"),
+    })
+    {
+        <div class="col-6 col-md-4 col-xl-3"><div class="stat-tile"><div class="text-muted small">@label</div><div class="value"><a class="text-decoration-none text-reset" href="@link">@value</a></div></div></div>
+    }
+</div>
+@{
+    var chartModel = ("Sales, last 30 days", (IReadOnlyList<(string Label, decimal Value)>)Dashboard.SalesChart.Select(p => (p.Label[..5], p.Value)).ToList());
+}
+<section class="card card-body" aria-labelledby="chart-title">
+    <h2 class="h5" id="chart-title">Sales, last 30 days</h2>
+    <partial name="_BarChart" model="chartModel" />
+</section>

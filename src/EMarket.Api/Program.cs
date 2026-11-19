@@ -1,12 +1,12 @@
 using System.Threading.RateLimiting;
 using EMarket.Api.Infrastructure;
 using EMarket.BLL;
+using EMarket.BLL.Common;
 using EMarket.BLL.Identity;
 using EMarket.BLL.Messaging;
 using Hangfire;
 using Hangfire.SqlServer;
 using EMarket.BLL.Payments;
-using EMarket.DAL;
 using EMarket.Shared.Constants;
 using EMarket.Shared.Results;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -27,8 +27,7 @@ var jwt = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOp
 builder.Services.AddSingleton(jwt);
 builder.Services.AddSingleton<IAccessTokenIssuer, JwtAccessTokenIssuer>();
 
-builder.Services.AddDalModule(builder.Configuration.GetConnectionString("DefaultConnection")!);
-builder.Services.AddBllModule();
+builder.Services.AddBllModule(builder.Configuration.GetConnectionString("DefaultConnection")!);
 var keysFolder = builder.Configuration["DataProtection:KeysFolder"];
 var dataProtection = builder.Services.AddDataProtection().SetApplicationName("EMarket");
 if (!string.IsNullOrWhiteSpace(keysFolder))

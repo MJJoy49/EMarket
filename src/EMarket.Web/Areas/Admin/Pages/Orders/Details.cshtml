@@ -1,0 +1,71 @@
+@page "/admin/orders/{id:guid}"
+@using EMarket.Shared.Dtos.Orders
+@{
+    ViewData["Title"] = Order is null ? "Order" : $"Order {Order.OrderNumber}";
+}
+@functions {
+    [FromRoute] public Guid Id { get; set; }
+    public OrderDetailDto? Order { get; private set; }
+
+    public async Task<IActionResult> OnGetAsync()
+    {
+        var result = await Api.GetAsync<OrderDetailDto>($"api/v1/admin/orders/{Id}");
+        if (result.Status == 404) { return NotFound(); }
+        if (Failed(result)) { return RedirectToPage("/Orders/Index"); }
+        Order = result.Data;
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostAsync(string action, string reason)
+    {
+        var path = action == "close" ? "close-delivered" : "cancel";
+        if (!Failed(await Api.PostAsync<Empty>($"api/v1/admin/orders/{Id}/{path}", new { reason }))) { Success(Messages.Saved); }
+        return RedirectToPage(new { id = Id });
+    }
+
+    public async Task<IActionResult> OnPostRetryAsync(Guid refundId)
+    {
+        if (!Failed(await Api.PostAsync<Empty>($"api/v1/admin/orders/refunds/{refundId}/retry"))) { Success("The refund was tried again."); }
+        return RedirectToPage(new { id = Id });
+    }
+}
+
+@if (Order is null) { return; }
+<h1 class="h3">Order @Order.OrderNumber <span class="badge @Format.Badge(Order.Status)">@Format.Status(Order.Status)</span></h1>
+<p class="text-muted">@Format.DateTime(Order.CreatedAt) &middot; Buyer @Order.BuyerName &middot; Shop @Order.ShopName</p>
+<div class="row g-4">
+    <div class="col-lg-7">
+        <section class="card card-body mb-3"><h2 class="h5">Status history</h2>
+            <ol class="timeline mb-0">@foreach (var c in Order.History) { <li><strong>@Format.Status(c.To)</strong> <span class="text-muted small">@Format.DateTime(c.At)</span>@if (!string.IsNullOrEmpty(c.Note)) { <div class="small">@c.Note</div> }</li> }</ol></section>
+        <section class="card card-body mb-3"><h2 class="h5">Items</h2>
+            <table class="table table-sm mb-0"><thead><tr><th scope="col">Item</th><th scope="col">Qty</th><th scope="col">Price</th></tr></thead>
+                <tbody>@foreach (var i in Order.Items) { <tr><td>@i.ProductName@(string.IsNullOrEmpty(i.VariantText) ? "" : $" ({i.VariantText})")</td><td>@i.Quantity</td><td>@Format.Tk(i.UnitPrice * i.Quantity)</td></tr> }</tbody></table>
+            <p class="text-end mb-0 mt-2">Items @Format.Tk(Order.ItemsTotal) &middot; Delivery @Format.Tk(Order.DeliveryFee) &middot; Discount @Format.Tk(Order.Discount) &middot; <strong>Total @Format.Tk(Order.Total)</strong></p></section>
+        <section class="card card-body"><h2 class="h5">Payments and refunds</h2>
+            @foreach (var p in Order.Payments) { <p class="mb-1">@p.Method @Format.Tk(p.Amount) <span class="badge @Format.Badge(p.Status)">@p.Status</span> <code>@p.TransactionId</code> <span class="text-muted small">@Format.DateTime(p.CreatedAt)</span></p> }
+            @if (Order.Payments.Count == 0) { <p class="text-muted mb-1">No payment records.</p> }
+            @foreach (var r in Order.Refunds)
+            {
+                <form class="d-flex align-items-center gap-2 mb-1" method="post" asp-page-handler="Retry" asp-route-refundId="@r.Id">
+                    <span>Refund @Format.Tk(r.Amount) (@r.Method) <span class="badge @Format.Badge(r.Status)">@r.Status</span></span>
+                    @if (r.Status == "Failed") { <button class="btn btn-outline-primary btn-sm" type="submit">Retry</button> }
+                </form>
+            }
+        </section>
+    </div>
+    <div class="col-lg-5">
+        <section class="card card-body mb-3"><h2 class="h5">Delivery</h2><p class="mb-0">@Order.ShipName<br />@Order.ShipAddress<br />@Order.ShipPhone</p></section>
+        @if (Order.AllowedActions.Contains("Cancelled") || Order.AllowedActions.Contains("CloseAsDelivered"))
+        {
+            <form class="card card-body" method="post">
+                <h2 class="h5">Admin action</h2>
+                <label class="form-label" for="reason">Reason (saved in the audit log)</label>
+                <input class="form-control mb-3" id="reason" name="reason" minlength="5" maxlength="200" required />
+                <div class="d-flex flex-wrap gap-2">
+                    @if (Order.AllowedActions.Contains("Cancelled")) { <button class="btn btn-outline-danger" name="action" value="cancel" type="submit">Cancel order</button> }
+                    @if (Order.AllowedActions.Contains("CloseAsDelivered")) { <button class="btn btn-outline-primary" name="action" value="close" type="submit">Close as delivered</button> }
+                </div>
+            </form>
+        }
+    </div>
+</div>

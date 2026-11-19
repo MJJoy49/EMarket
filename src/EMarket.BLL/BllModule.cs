@@ -2,6 +2,7 @@ using EMarket.BLL.Admin;
 using EMarket.BLL.AfterSale;
 using EMarket.BLL.Catalog;
 using EMarket.BLL.Common;
+using EMarket.DAL;
 using EMarket.BLL.Finance;
 using EMarket.BLL.Shopping;
 using EMarket.BLL.Identity;
@@ -18,8 +19,10 @@ namespace EMarket.BLL;
 
 public static class BllModule
 {
-    public static IServiceCollection AddBllModule(this IServiceCollection services)
+    /// <summary>Wires the business layer and, below it, the data layer. The API host never touches the DAL (NFR-68).</summary>
+    public static IServiceCollection AddBllModule(this IServiceCollection services, string connectionString)
     {
+        services.AddDalModule(connectionString);
         services.AddMemoryCache();
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<IPasswordHasher<User>, PasswordHasher<User>>();

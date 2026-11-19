@@ -1,0 +1,34 @@
+@page "/admin/settings/pages/{slug}"
+@using EMarket.Shared.Dtos.Admin
+@{
+    ViewData["Title"] = "Edit page";
+}
+@functions {
+    [FromRoute] public string Slug { get; set; } = "";
+    [BindProperty] public SavePageRequest Input { get; set; } = new();
+    public string Title_ { get; private set; } = "";
+
+    public async Task<IActionResult> OnGetAsync()
+    {
+        var page = await Api.GetAsync<StaticPageDto>($"api/v1/pages/{Uri.EscapeDataString(Slug)}");
+        if (Failed(page)) { return RedirectToPage("/Settings/Index"); }
+        Title_ = page.Data!.Title;
+        Input.Html = page.Data.Html;
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostAsync()
+    {
+        var result = await Api.PutAsync<Empty>($"api/v1/admin/pages/{Uri.EscapeDataString(Slug)}", Input);
+        if (!result.Ok) { Problem(result.Message); Title_ = Slug; return Page(); }
+        Success(Messages.Saved);
+        return RedirectToPage(new { slug = Slug });
+    }
+}
+
+<h1 class="h3">Edit page: @Title_</h1>
+<form class="card card-body" method="post" novalidate>
+    <label class="form-label" asp-for="Input.Html">Content (simple HTML: headings, paragraphs, lists, links)</label>
+    <textarea class="form-control mb-3" asp-for="Input.Html" rows="14" maxlength="4000"></textarea>
+    <div class="d-flex gap-2"><button class="btn btn-primary" type="submit">Save</button><a class="btn btn-outline-secondary" asp-page="/Settings/Index">Back</a><a class="btn btn-outline-secondary" asp-area="" asp-page="/Pages/Show" asp-route-slug="@Slug">View page</a></div>
+</form>

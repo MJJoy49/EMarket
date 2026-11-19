@@ -15,3 +15,8 @@ jobs:
       - run: dotnet restore
       - run: dotnet build --no-restore -c Release
       - run: dotnet test --no-build -c Release
+      # NFR-43: a release has no package with a High or Critical known vulnerability.
+      - name: Package vulnerability check
+        run: |
+          dotnet list package --vulnerable --include-transitive 2>&1 | tee vulnerabilities.txt
+          if grep -E "^\s*>.*\s(High|Critical)\s" vulnerabilities.txt; then echo "High or Critical vulnerability found"; exit 1; fi

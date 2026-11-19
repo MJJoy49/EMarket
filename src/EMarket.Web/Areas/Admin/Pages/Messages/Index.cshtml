@@ -1,0 +1,64 @@
+@page "/admin/messages"
+@using EMarket.Shared.Dtos.Admin
+@using EMarket.Shared.Results
+@{
+    ViewData["Title"] = "Contact messages";
+}
+@functions {
+    public PagedResult<ContactMessageDto>? Messages_ { get; private set; }
+    public ContactMessageDto? Open { get; private set; }
+    public string Current => Request.Query["status"].ToString() is "Read" or "Closed" ? Request.Query["status"].ToString() : "New";
+
+    public async Task OnGetAsync(Guid? open)
+    {
+        var result = await Api.GetAsync<PagedResult<ContactMessageDto>>($"api/v1/admin/messages?status={Current}&search={Uri.EscapeDataString(Request.Query["search"].ToString())}&page={Math.Max(1, int.TryParse(Request.Query["page"], out var p) ? p : 1)}");
+        if (!Failed(result)) { Messages_ = result.Data; }
+        if (open is { } id) { Open = (await Api.GetAsync<ContactMessageDto>($"api/v1/admin/messages/{id}")).Data; } // opening a new message makes it Read (FR-23.5)
+    }
+
+    public async Task<IActionResult> OnPostCloseAsync(Guid id)
+    {
+        if (!Failed(await Api.PostAsync<Empty>($"api/v1/admin/messages/{id}/close"))) { Success(Messages.Saved); }
+        return RedirectToPage(new { status = Current });
+    }
+}
+
+<h1 class="h3">Contact messages</h1>
+<ul class="nav nav-pills mb-3" aria-label="Message status">
+    @foreach (var (value, text) in new[] { ("New", "New"), ("Read", "Read"), ("Closed", "Closed") })
+    {
+        <li class="nav-item"><a class="nav-link @(Current == value ? "active" : "")" asp-page="/Messages/Index" asp-route-status="@value">@text</a></li>
+    }
+</ul>
+<form class="d-flex gap-2 mb-3" method="get" role="search">
+    <input type="hidden" name="status" value="@Current" />
+    <label class="visually-hidden" for="search">Search by name, email or subject</label>
+    <input class="form-control" id="search" name="search" value="@Request.Query["search"]" placeholder="Search by name, email or subject" />
+    <button class="btn btn-outline-primary" type="submit">Search</button>
+</form>
+
+@if (Open is not null)
+{
+    <article class="card card-body mb-3">
+        <h2 class="h5">@Open.Subject</h2>
+        <p class="text-muted small mb-2">@Open.Name &lt;@Open.Email&gt; &middot; @Format.DateTime(Open.CreatedAt)</p>
+        <p style="white-space: pre-line">@Open.Message</p>
+        <div class="d-flex gap-2">
+            <a class="btn btn-primary" href="mailto:@Open.Email?subject=Re: @Uri.EscapeDataString(Open.Subject)">Reply</a>
+            @if (Open.Status != "Closed") { <form method="post" asp-page-handler="Close" asp-route-id="@Open.Id"><button class="btn btn-outline-secondary" type="submit">Close</button></form> }
+        </div>
+    </article>
+}
+
+@if (Messages_ is null || Messages_.Items.Count == 0) { <p class="text-muted">No messages here.</p> return; }
+<table class="table align-middle table-cards">
+    <thead><tr><th scope="col">Name</th><th scope="col">Email</th><th scope="col">Subject</th><th scope="col">Date</th><th scope="col"><span class="visually-hidden">Open</span></th></tr></thead>
+    <tbody>
+        @foreach (var m in Messages_.Items)
+        {
+            <tr><td data-label="Name">@m.Name</td><td data-label="Email">@m.Email</td><td data-label="Subject">@m.Subject</td><td data-label="Date">@Format.Date(m.CreatedAt)</td>
+                <td class="text-end"><a class="btn btn-outline-primary btn-sm" asp-page="/Messages/Index" asp-route-open="@m.Id" asp-route-status="@Current">Read</a></td></tr>
+        }
+    </tbody>
+</table>
+<partial name="_Pager" model="(Messages_.Page, Messages_.TotalPages)" />

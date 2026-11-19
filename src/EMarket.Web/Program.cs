@@ -31,6 +31,9 @@ builder.Services.AddHttpClient<ApiClient>(client => client.BaseAddress = apiBase
         options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(30);
         options.Retry.MaxRetryAttempts = 3;
         options.Retry.DisableForUnsafeHttpMethods();
+        // A 503 is the API saying "under maintenance" on purpose (FR-21.9). It is not a fault to retry or to count against the breaker.
+        options.Retry.ShouldHandle = args => ValueTask.FromResult(IsTransient(args.Outcome));
+        options.CircuitBreaker.ShouldHandle = args => ValueTask.FromResult(IsTransient(args.Outcome));
         options.CircuitBreaker.MinimumThroughput = 5;
         options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(30);
         options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(30);
@@ -121,6 +124,11 @@ app.MapGet("/ui/counts", async (HttpContext context, ApiClient api, Cancellation
 
 app.MapRazorPages();
 app.Run();
+
+static bool IsTransient(Polly.Outcome<HttpResponseMessage> outcome) =>
+    outcome.Exception is HttpRequestException or Polly.Timeout.TimeoutRejectedException
+    || outcome.Result is { StatusCode: var code } && (code == System.Net.HttpStatusCode.RequestTimeout
+        || ((int)code >= 500 && code != System.Net.HttpStatusCode.ServiceUnavailable));
 
 static async Task<IResult> ProxyAsync(ApiClient api, string path, bool cache, CancellationToken ct)
 {

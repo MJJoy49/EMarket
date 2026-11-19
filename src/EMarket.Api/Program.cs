@@ -7,6 +7,7 @@ using EMarket.Shared.Constants;
 using EMarket.Shared.Results;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
@@ -24,6 +25,12 @@ builder.Services.AddSingleton<IAccessTokenIssuer, JwtAccessTokenIssuer>();
 
 builder.Services.AddDalModule(builder.Configuration.GetConnectionString("DefaultConnection")!);
 builder.Services.AddBllModule();
+var keysFolder = builder.Configuration["DataProtection:KeysFolder"];
+var dataProtection = builder.Services.AddDataProtection().SetApplicationName("EMarket");
+if (!string.IsNullOrWhiteSpace(keysFolder))
+{
+    dataProtection.PersistKeysToFileSystem(new DirectoryInfo(keysFolder));
+}
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
@@ -86,6 +93,7 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseRateLimiter();
+app.UseMiddleware<MustChangePasswordMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
 

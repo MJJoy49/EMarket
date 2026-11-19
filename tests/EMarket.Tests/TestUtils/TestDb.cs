@@ -1,0 +1,74 @@
+using EMarket.BLL.Common;
+using EMarket.DAL.Data;
+using EMarket.Domain.Entities;
+using EMarket.Shared.Constants;
+using Microsoft.EntityFrameworkCore;
+
+namespace EMarket.Tests.TestUtils;
+
+/// <summary>An in-memory database with the three roles, plus helpers to add common rows.</summary>
+public static class TestDb
+{
+    public static AppDbContext Create()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        var db = new AppDbContext(options);
+        foreach (var role in new[] { Roles.Buyer, Roles.Seller, Roles.Admin })
+        {
+            db.AspNetRoles.Add(new AspNetRole { Id = Guid.NewGuid(), Name = role, NormalizedName = role.ToUpperInvariant() });
+        }
+
+        db.SaveChanges();
+        return db;
+    }
+
+    public static User AddUser(this AppDbContext db, string role = Roles.Buyer, bool emailConfirmed = true, string? email = null)
+    {
+        var user = new User
+        {
+            Id = Guid.CreateVersion7(),
+            FullName = "Test User",
+            Email = email ?? $"{Guid.NewGuid():N}@example.com",
+            Phone = "01712345678",
+            PasswordHash = "hash",
+            SecurityStamp = Guid.NewGuid().ToString("N"),
+            Status = "Active",
+            EmailConfirmed = emailConfirmed,
+        };
+        user.Roles.Add(db.AspNetRoles.Single(r => r.Name == role));
+        db.Users.Add(user);
+        db.SaveChanges();
+        return user;
+    }
+}
+
+public sealed class FakeClock : IClock
+{
+    public DateTime UtcNow { get; set; } = new(2026, 11, 18, 6, 0, 0, DateTimeKind.Utc);
+}
+
+public sealed class FakeFiles : IFileStorage
+{
+    public List<string> Saved { get; } = [];
+
+    public Task<string> SaveImageAsync(UploadFile file, string folder, CancellationToken ct = default)
+    {
+        var path = $"{folder}/{Guid.NewGuid():N}.jpg";
+        Saved.Add(path);
+        return Task.FromResult(path);
+    }
+
+    public Stream? Open(string path) => Saved.Contains(path) ? new MemoryStream([1, 2, 3]) : null;
+
+    public void Delete(string path) => Saved.Remove(path);
+}
+
+public sealed class FakeSecrets : ISecretProtector
+{
+    public string Protect(string value) => $"enc:{value}";
+
+    public string Unprotect(string value) => value["enc:".Length..];
+}

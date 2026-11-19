@@ -223,6 +223,17 @@ public sealed class SellerEarningsController(EarningsService earnings) : ApiCont
     public Task<IReadOnlyList<EarningRowDto>> Earnings([FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct) =>
         earnings.EarningsAsync(UserId, from, to, ct);
 
+    /// <summary>FR-15.5: the same rows and totals as the screen.</summary>
+    [HttpGet("earnings.xlsx")]
+    public async Task<IActionResult> EarningsExcel([FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
+    {
+        var rows = await earnings.EarningsAsync(UserId, from, to, ct);
+        var lines = rows.Select(r => (IReadOnlyList<object?>)[r.Date, r.OrderNumber, r.ItemsTotal, r.Commission, r.DeliveryFee, r.Net, r.State])
+            .Append(["Total", null, rows.Sum(r => r.ItemsTotal), rows.Sum(r => r.Commission), rows.Sum(r => r.DeliveryFee), rows.Sum(r => r.Net), null]);
+        return File(EMarket.BLL.Admin.ReportService.ToExcel("Earnings", ["Date", "Order", "Items", "Commission", "Delivery fee", "Net", "State"], lines),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "earnings.xlsx");
+    }
+
     [HttpGet("payouts")]
     public Task<PagedResult<PayoutDto>> Payouts([FromQuery] int page = 1, CancellationToken ct = default) => earnings.PayoutsAsync(UserId, null, page, ct);
 

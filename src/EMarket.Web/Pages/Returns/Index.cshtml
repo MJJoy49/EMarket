@@ -1,0 +1,38 @@
+@page "/returns"
+@using EMarket.Shared.Dtos.AfterSale
+@using EMarket.Shared.Results
+@{
+    ViewData["Title"] = "My returns";
+}
+@functions {
+    public PagedResult<ReturnDto>? Requests { get; private set; }
+
+    public async Task OnGetAsync()
+    {
+        var result = await Api.GetAsync<PagedResult<ReturnDto>>($"api/v1/returns?page={Math.Max(1, int.TryParse(Request.Query["page"], out var p) ? p : 1)}");
+        if (!Failed(result)) { Requests = result.Data; }
+    }
+}
+
+<h1 class="h3">My returns</h1>
+@if (Requests is null || Requests.Items.Count == 0)
+{
+    <p class="text-muted">You have no return requests.</p>
+    return;
+}
+<table class="table align-middle table-cards">
+    <thead><tr><th scope="col">Order</th><th scope="col">Reason</th><th scope="col">Refund</th><th scope="col">Status</th><th scope="col">Date</th></tr></thead>
+    <tbody>
+        @foreach (var r in Requests.Items)
+        {
+            <tr>
+                <td data-label="Order"><a asp-page="/Returns/Show" asp-route-id="@r.Id">@r.OrderNumber</a></td>
+                <td data-label="Reason">@Format.Status(r.Reason)</td>
+                <td data-label="Refund">@Format.Tk(r.RefundAmount)</td>
+                <td data-label="Status"><span class="badge @Format.Badge(r.Status)">@Format.Status(r.Status)</span></td>
+                <td data-label="Date">@Format.Date(r.CreatedAt)</td>
+            </tr>
+        }
+    </tbody>
+</table>
+<partial name="_Pager" model="(Requests.Page, Requests.TotalPages)" />

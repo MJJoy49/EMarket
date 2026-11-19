@@ -1,0 +1,58 @@
+@page "/shops/{slug}"
+@using EMarket.Shared.Results
+@{
+    ViewData["Title"] = Shop?.Name ?? "Shop";
+}
+@functions {
+    [FromRoute] public string Slug { get; set; } = "";
+    public ShopPageDto? Shop { get; private set; }
+    public PagedResult<ProductListItemDto>? Results { get; private set; }
+
+    public async Task<IActionResult> OnGetAsync()
+    {
+        var shop = await Api.GetAsync<ShopPageDto>($"api/v1/shops/{Uri.EscapeDataString(Slug)}");
+        if (shop.Status == 404) { return NotFound(); }
+        if (Failed(shop)) { return RedirectToPage("/Index"); }
+        Shop = shop.Data;
+        if (Shop!.Available)
+        {
+            var query = $"?shopId={Shop.Id}&q={Uri.EscapeDataString(Request.Query["q"].ToString())}&categoryId={Request.Query["categoryId"]}&page={Request.Query["page"]}";
+            Results = (await Api.GetAsync<PagedResult<ProductListItemDto>>("api/v1/products" + query.Replace("&q=&", "&"))).Data;
+        }
+
+        return Page();
+    }
+}
+
+@if (Shop is null) { return; }
+
+@if (!Shop.Available)
+{
+    <div class="alert alert-warning" role="status">@Messages.ShopUnavailable</div>
+    return;
+}
+
+<header class="card card-body mb-4">
+    @if (!string.IsNullOrEmpty(Shop.BannerUrl)) { <img class="img-fluid rounded mb-3" src="@Format.Media(Shop.BannerUrl)" alt="" /> }
+    <h1 class="h3">@Shop.Name</h1>
+    <p class="mb-1">@Shop.Description</p>
+    <p class="mb-0 text-muted">Rating <span class="rating">&#9733; @Shop.Rating.ToString("0.0")</span> &middot; @Shop.ProductCount products &middot; Joined @Format.Date(Shop.JoinedAt)</p>
+</header>
+
+<form class="d-flex gap-2 mb-3" method="get" role="search">
+    <label class="visually-hidden" for="shop-q">Search in this shop</label>
+    <input class="form-control" id="shop-q" name="q" value="@Request.Query["q"]" placeholder="Search in this shop" minlength="2" maxlength="100" />
+    <button class="btn btn-primary" type="submit">Search</button>
+</form>
+
+@if (Results is null || Results.Items.Count == 0)
+{
+    <p class="text-muted">No products found.</p>
+}
+else
+{
+    <div class="row row-cols-2 row-cols-md-3 row-cols-lg-4 g-3">
+        @foreach (var product in Results.Items) { <div class="col"><partial name="_ProductCard" model="product" /></div> }
+    </div>
+    <div class="mt-4"><partial name="_Pager" model="(Results.Page, Results.TotalPages)" /></div>
+}

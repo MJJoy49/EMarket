@@ -1,0 +1,103 @@
+@page "/cart"
+@using EMarket.Shared.Dtos.Cart
+@{
+    ViewData["Title"] = "Shopping cart";
+}
+@functions {
+    public CartDto? Cart { get; private set; }
+
+    public async Task OnGetAsync()
+    {
+        var result = await Api.GetAsync<CartDto>("api/v1/cart");
+        if (!Failed(result)) { Cart = result.Data; }
+    }
+
+    public async Task<IActionResult> OnPostUpdateAsync(Guid id, int quantity)
+    {
+        Failed(await Api.PutAsync<Empty>($"api/v1/cart/items/{id}", new { quantity }));
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostRemoveAsync(Guid id) { Failed(await Api.DeleteAsync<Empty>($"api/v1/cart/items/{id}")); return RedirectToPage(); }
+
+    public async Task<IActionResult> OnPostCouponAsync(string? code)
+    {
+        var result = await Api.PostAsync<System.Text.Json.JsonElement>("api/v1/cart/coupon", new { code });
+        if (result.Ok) { Success(result.Data.GetProperty("message").GetString()!); } else { Problem(result.Message); }
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostRemoveCouponAsync() { await Api.DeleteAsync<Empty>("api/v1/cart/coupon"); return RedirectToPage(); }
+}
+
+<h1 class="h3">Shopping cart @if (Cart is { LineCount: > 0 }) { <small class="text-muted">(@Cart.LineCount items)</small> }</h1>
+
+@if (Cart is null || Cart.LineCount == 0)
+{
+    <div class="card card-body text-center"><p class="mb-2">Your cart is empty.</p><a class="btn btn-primary align-self-center" asp-page="/Products/Index">Continue shopping</a></div>
+    return;
+}
+
+<div class="row g-4">
+    <div class="col-lg-8">
+        @foreach (var shop in Cart.Shops)
+        {
+            <section class="card mb-3" aria-label="Items from @shop.ShopName">
+                <div class="card-header fw-semibold">@shop.ShopName</div>
+                <ul class="list-group list-group-flush">
+                    @foreach (var line in shop.Lines)
+                    {
+                        <li class="list-group-item @(line.Available ? "" : "unavailable")">
+                            <div class="d-flex gap-3">
+                                @if (!string.IsNullOrEmpty(line.ThumbUrl)) { <img src="@Format.Media(line.ThumbUrl)" alt="" width="72" height="72" class="rounded" loading="lazy" /> }
+                                <div class="flex-grow-1">
+                                    <a class="fw-semibold" asp-page="/Products/Details" asp-route-id="@line.ProductId">@line.ProductName</a>
+                                    @if (!string.IsNullOrEmpty(line.VariantText)) { <div class="small text-muted">@line.VariantText</div> }
+                                    <div>@Format.Tk(line.UnitPrice) each</div>
+                                    @if (!line.Available) { <div class="text-danger small" role="status">Unavailable: @line.Problem</div> }
+                                </div>
+                                <div class="text-end">
+                                    <div class="fw-semibold">@Format.Tk(line.LineTotal)</div>
+                                    <form class="d-flex gap-1 mt-1 justify-content-end" method="post" asp-page-handler="Update" asp-route-id="@line.Id">
+                                        <label class="visually-hidden" for="q-@line.Id">Quantity</label>
+                                        <input class="form-control form-control-sm" style="width:4.5rem" id="q-@line.Id" name="quantity" type="number" min="1" max="10" value="@line.Quantity" data-autosubmit />
+                                        <noscript><button class="btn btn-sm btn-outline-secondary" type="submit">Update</button></noscript>
+                                    </form>
+                                    <form method="post" asp-page-handler="Remove" asp-route-id="@line.Id" class="mt-1"><button class="btn btn-link btn-sm text-danger p-0" type="submit">Remove</button></form>
+                                </div>
+                            </div>
+                        </li>
+                    }
+                </ul>
+                <div class="card-footer d-flex justify-content-between"><span>Subtotal @Format.Tk(shop.Subtotal)</span><span>Delivery @Format.Tk(shop.DeliveryFee)</span></div>
+            </section>
+        }
+    </div>
+    <aside class="col-lg-4" aria-label="Order summary">
+        <div class="card card-body">
+            <h2 class="h5">Summary</h2>
+            @if (Cart.CouponCode is null)
+            {
+                <form class="d-flex gap-2 mb-3" method="post" asp-page-handler="Coupon">
+                    <label class="visually-hidden" for="coupon">Coupon code</label>
+                    <input class="form-control" id="coupon" name="code" placeholder="Coupon code" minlength="4" maxlength="20" pattern="[A-Za-z0-9]{4,20}" />
+                    <button class="btn btn-outline-primary" type="submit">Apply</button>
+                </form>
+            }
+            else
+            {
+                <form class="d-flex justify-content-between align-items-center mb-3" method="post" asp-page-handler="RemoveCoupon">
+                    <span>Coupon <strong>@Cart.CouponCode</strong></span><button class="btn btn-link btn-sm p-0" type="submit">Remove</button>
+                </form>
+            }
+            <dl class="row mb-0">
+                <dt class="col-6 fw-normal">Subtotal</dt><dd class="col-6 text-end">@Format.Tk(Cart.Subtotal)</dd>
+                <dt class="col-6 fw-normal">Delivery</dt><dd class="col-6 text-end">@Format.Tk(Cart.DeliveryTotal)</dd>
+                <dt class="col-6 fw-normal">Discount</dt><dd class="col-6 text-end">-@Format.Tk(Cart.Discount)</dd>
+                <dt class="col-6">Total</dt><dd class="col-6 text-end fw-bold">@Format.Tk(Cart.Total)</dd>
+            </dl>
+            <a class="btn btn-accent mt-3 @(Cart.Subtotal == 0 ? "disabled" : "")" asp-page="/Checkout/Index" aria-disabled="@(Cart.Subtotal == 0)">Proceed to checkout</a>
+            <a class="btn btn-outline-secondary mt-2" asp-page="/Products/Index">Continue shopping</a>
+        </div>
+    </aside>
+</div>

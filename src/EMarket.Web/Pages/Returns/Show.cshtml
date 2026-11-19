@@ -1,0 +1,43 @@
+@page "/returns/{id:guid}"
+@using EMarket.Shared.Dtos.AfterSale
+@{
+    ViewData["Title"] = "Return request";
+}
+@functions {
+    [FromRoute] public Guid Id { get; set; }
+    public ReturnDto? Request_ { get; private set; }
+
+    public async Task<IActionResult> OnGetAsync()
+    {
+        var result = await Api.GetAsync<ReturnDto>($"api/v1/returns/{Id}");
+        if (result.Status == 404) { return NotFound(); }
+        if (Failed(result)) { return RedirectToPage("/Returns/Index"); }
+        Request_ = result.Data;
+        return Page();
+    }
+
+    // FR-13.7: a request the seller rejected can be sent to the admin once.
+    public async Task<IActionResult> OnPostEscalateAsync()
+    {
+        if (!Failed(await Api.PostAsync<Empty>($"api/v1/returns/{Id}/escalate"))) { Success("Your request was sent to the admin."); }
+        return RedirectToPage(new { id = Id });
+    }
+}
+
+@if (Request_ is null) { return; }
+<h1 class="h3">Return &middot; Order <a asp-page="/Orders/Details" asp-route-id="@Request_.OrderId">@Request_.OrderNumber</a> <span class="badge @Format.Badge(Request_.Status)">@Format.Status(Request_.Status)</span></h1>
+<div class="card card-body" style="max-width: 720px">
+    <p class="mb-1"><strong>Reason:</strong> @Format.Status(Request_.Reason)</p>
+    @if (!string.IsNullOrWhiteSpace(Request_.Description)) { <p class="mb-1">@Request_.Description</p> }
+    <ul>@foreach (var line in Request_.Items) { <li>@line.Quantity &times; @line.ProductName@(string.IsNullOrEmpty(line.VariantText) ? "" : $" ({line.VariantText})")</li> }</ul>
+    <p class="mb-1"><strong>Refund:</strong> @Format.Tk(Request_.RefundAmount) (@(Request_.RefundMethod == "StoreCredit" ? "store credit" : "original payment method"))</p>
+    @if (!string.IsNullOrEmpty(Request_.RejectionReason)) { <p class="text-danger mb-1"><strong>Reason for rejection:</strong> @Request_.RejectionReason</p> }
+    @if (Request_.Escalated) { <p class="text-muted mb-1">This request was sent to the admin.</p> }
+    <div class="d-flex flex-wrap gap-2 mb-2">
+        @for (var i = 0; i < Request_.PhotoUrls.Count; i++) { <img class="rounded border" src="/files/returns/@Request_.Id/@i" alt="Photo @(i + 1) of the return" width="96" height="96" /> }
+    </div>
+    @if (Request_.AllowedActions.Contains("SendToAdmin"))
+    {
+        <form method="post" asp-page-handler="Escalate"><button class="btn btn-outline-primary" type="submit">Ask the admin to decide</button></form>
+    }
+</div>

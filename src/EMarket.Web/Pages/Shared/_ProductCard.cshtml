@@ -1,0 +1,52 @@
+@model ProductListItemDto
+<div class="card product-card">
+    <a asp-page="/Products/Details" asp-route-id="@Model.Id" aria-label="@Model.Name">
+        @if (!string.IsNullOrEmpty(Model.ThumbUrl))
+        {
+            <img class="thumb" src="@Format.Media(Model.ThumbUrl)" alt="@Model.Name" loading="lazy" width="320" height="320" />
+        }
+        else
+        {
+            <div class="thumb" role="img" aria-label="No image"></div>
+        }
+    </a>
+    <div class="card-body d-flex flex-column">
+        <a class="text-decoration-none text-reset fw-semibold mb-1" asp-page="/Products/Details" asp-route-id="@Model.Id">@Model.Name</a>
+        <div class="small text-muted mb-1">@Model.ShopName</div>
+        <div class="mb-1">
+            <span class="price">@Format.Tk(Model.FinalPrice)</span>
+            @if (Model.DiscountPercent > 0)
+            {
+                <span class="price-old ms-1">@Format.Tk(Model.Price)</span>
+            }
+        </div>
+        <div class="small mb-2">
+            @if (Model.ReviewCount > 0)
+            {
+                <span class="rating" aria-label="Rated @Model.AverageRating out of 5">&#9733; @Model.AverageRating.ToString("0.0")</span>
+                <span class="text-muted">(@Model.ReviewCount)</span>
+            }
+            else
+            {
+                <span class="text-muted">No reviews yet</span>
+            }
+        </div>
+        <div class="mt-auto d-flex gap-2">
+            @if (Model.InStock)
+            {
+                <a class="btn btn-primary flex-grow-1" asp-page="/Products/Details" asp-route-id="@Model.Id">View</a>
+            }
+            else
+            {
+                <span class="btn btn-outline-secondary flex-grow-1 disabled" aria-disabled="true">Out of stock</span>
+            }
+            @if (User.Identity?.IsAuthenticated == true && !User.IsInRole("Admin"))
+            {
+                <form method="post" asp-page="/Wishlist/Index" asp-page-handler="Toggle" asp-route-id="@Model.Id">
+                    <input type="hidden" name="returnUrl" value="@(Context.Request.Path + Context.Request.QueryString)" />
+                    <button class="btn btn-outline-secondary" type="submit" aria-label="Save @Model.Name to wishlist" title="Wishlist">&#9825;</button>
+                </form>
+            }
+        </div>
+    </div>
+</div>

@@ -11,7 +11,7 @@ namespace EMarket.Api.Controllers;
 
 [Route("api/v1/orders")]
 [Authorize(Roles = $"{Roles.Buyer},{Roles.Seller}")]
-public sealed class OrdersController(OrderService orders, PaymentService payments) : ApiControllerBase
+public sealed class OrdersController(OrderService orders, PaymentService payments, InvoiceService invoices, EMarket.BLL.Shopping.CartService carts) : ApiControllerBase
 {
     [HttpGet]
     public Task<PagedResult<OrderListItemDto>> List([FromQuery] string? status, [FromQuery] int page = 1, CancellationToken ct = default) =>
@@ -26,6 +26,17 @@ public sealed class OrdersController(OrderService orders, PaymentService payment
         await orders.CancelByBuyerAsync(UserId, id, request.Reason, ct);
         return Ok(new { message = Messages.OrderCancelled });
     }
+
+    [HttpGet("{id:guid}/invoice")]
+    public async Task<IActionResult> Invoice(Guid id, CancellationToken ct)
+    {
+        var (pdf, fileName) = await invoices.BuildAsync(UserId, id, ct);
+        return File(pdf, "application/pdf", fileName);
+    }
+
+    /// <summary>FR-10.9: the available items go back into the cart; the rest are named in the answer.</summary>
+    [HttpPost("{id:guid}/reorder")]
+    public async Task<IActionResult> Reorder(Guid id, CancellationToken ct) => Ok(new { skipped = await carts.ReorderAsync(UserId, id, ct) });
 
     /// <summary>Pay now for a whole checkout group (FR-10.3).</summary>
     [HttpPost("groups/{groupId:guid}/pay")]

@@ -1,0 +1,25 @@
+@* A small server-drawn bar chart (SVG). It needs no script, so it also works under the strict Content-Security-Policy. *@
+@model (string Title, IReadOnlyList<(string Label, decimal Value)> Points)
+@{
+    var max = Model.Points.Count == 0 ? 0 : Model.Points.Max(p => p.Value);
+    var width = 600;
+    var height = 160;
+    var step = Model.Points.Count == 0 ? width : (double)width / Model.Points.Count;
+}
+<figure class="mb-0">
+    <svg class="chart" viewBox="0 0 @width @(height + 20)" role="img" aria-label="@Model.Title">
+        <title>@Model.Title</title>
+        @for (var i = 0; i < Model.Points.Count; i++)
+        {
+            var point = Model.Points[i];
+            var h = max == 0 ? 0 : (double)(point.Value / max) * height;
+            <rect x="@((i * step + 1).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))" y="@((height - h).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))"
+                  width="@(Math.Max(1, step - 2).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))" height="@h.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)" rx="2">
+                <title>@point.Label: @Format.Tk(point.Value)</title>
+            </rect>
+        }
+        <text x="0" y="@(height + 14)">@(Model.Points.FirstOrDefault().Label)</text>
+        <text x="@width" y="@(height + 14)" text-anchor="end">@(Model.Points.LastOrDefault().Label)</text>
+    </svg>
+    <figcaption class="visually-hidden">@Model.Title: total @Format.Tk(Model.Points.Sum(p => p.Value))</figcaption>
+</figure>

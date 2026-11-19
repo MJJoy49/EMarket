@@ -161,6 +161,36 @@ public sealed class AfterSaleTests
     }
 
     [Fact]
+    public async Task The_invoice_is_a_pdf_only_for_the_owner_and_only_after_confirmation()
+    {
+        var order = await m.PlaceAsync([(m.AddProduct(500), 1)]);
+        var invoices = new EMarket.BLL.Orders.InvoiceService(m.Db);
+        await Should.ThrowAsync<AppException>(() => invoices.BuildAsync(m.Buyer.Id, order.Id)); // still Pending
+
+        await m.Orders.SellerMoveAsync(m.Seller.Id, order.Id, "Confirmed", null);
+        var (pdf, name) = await invoices.BuildAsync(m.Buyer.Id, order.Id);
+
+        System.Text.Encoding.ASCII.GetString(pdf, 0, 4).ShouldBe("%PDF");
+        name.ShouldStartWith("invoice-EM-");
+        (await Should.ThrowAsync<AppException>(() => invoices.BuildAsync(m.Seller.Id, order.Id))).StatusCode.ShouldBe(404); // not the buyer
+    }
+
+    [Fact]
+    public async Task Reorder_copies_available_items_and_names_the_skipped_ones()
+    {
+        var kept = m.AddProduct(500);
+        var gone = m.AddProduct(700);
+        var order = await m.PlaceAsync([(kept, 1), (gone, 1)]);
+        gone.Status = "Hidden";
+        await m.Db.SaveChangesAsync();
+
+        var skipped = await m.Carts.ReorderAsync(m.Buyer.Id, order.Id);
+
+        skipped.ShouldBe([gone.Name]);
+        (await m.Db.CartItems.SingleAsync()).ProductId.ShouldBe(kept.Id);
+    }
+
+    [Fact]
     public async Task Changing_payout_details_needs_the_password()
     {
         var request = new PayoutDetailsRequest { CurrentPassword = "Wrong7Pass", PayoutMethod = "Nagad", WalletNumber = "01812345678" };

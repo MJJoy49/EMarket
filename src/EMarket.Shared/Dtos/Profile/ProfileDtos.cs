@@ -24,6 +24,8 @@ public sealed class UpdateProfileRequest
     public DateOnly? BirthDate { get; set; }
 }
 
+public sealed record CreditLineDto(DateTime At, string Kind, decimal Amount, string? OrderNumber);
+
 public sealed record LocationDto(Guid Id, string Name, string Level, bool IsInsideDhaka);
 
 public sealed record AddressDto(

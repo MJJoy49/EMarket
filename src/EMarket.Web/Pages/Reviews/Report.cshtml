@@ -1,0 +1,11 @@
+@page "/reviews/{id:guid}/report"
+@functions {
+    public IActionResult OnGet() => RedirectToPage("/Index");
+
+    public async Task<IActionResult> OnPostAsync(Guid id, string reason, string? returnUrl)
+    {
+        var result = await Api.PostAsync<Empty>($"api/v1/reviews/{id}/report", new { reason });
+        if (result.Ok) { Success("Thank you. The admin will look at this review."); } else { Problem(result.Message); }
+        return LocalRedirectOr(returnUrl, "/Index");
+    }
+}

@@ -1,0 +1,64 @@
+@page "/wishlist"
+@using System.Text.Json
+@using EMarket.Shared.Dtos.Cart
+@{
+    ViewData["Title"] = "Wishlist";
+}
+@functions {
+    public IReadOnlyList<WishlistItemDto> Items { get; private set; } = [];
+
+    public async Task OnGetAsync()
+    {
+        var result = await Api.GetAsync<List<WishlistItemDto>>("api/v1/wishlist");
+        if (!Failed(result)) { Items = result.Data ?? []; }
+    }
+
+    // The heart button on cards and product pages adds the product, or removes it when it is already saved (FR-7.1).
+    public async Task<IActionResult> OnPostToggleAsync(Guid id, string? returnUrl)
+    {
+        var result = await Api.PostAsync<JsonElement>($"api/v1/wishlist/{id}/toggle");
+        if (Failed(result)) { return LocalRedirectOr(returnUrl, "/Wishlist/Index"); }
+        Success(result.Data.GetProperty("saved").GetBoolean() ? "Saved to your wishlist." : "Removed from your wishlist.");
+        return LocalRedirectOr(returnUrl, "/Wishlist/Index");
+    }
+
+    public async Task<IActionResult> OnPostMoveAsync(Guid id, bool hasVariants)
+    {
+        if (hasVariants) { return RedirectToPage("/Products/Details", new { id }); } // a variant has to be chosen first (FR-7.3)
+        var added = await Api.PostAsync<JsonElement>("api/v1/cart/items", new { productId = id, quantity = 1 });
+        if (Failed(added)) { return RedirectToPage(); }
+        await Api.PostAsync<JsonElement>($"api/v1/wishlist/{id}/toggle");
+        Success(Messages.AddedToCart);
+        return RedirectToPage("/Cart/Index");
+    }
+}
+
+<h1 class="h3">Wishlist @if (Items.Count > 0) { <small class="text-muted">(@Items.Count items)</small> }</h1>
+
+@if (Items.Count == 0)
+{
+    <div class="card card-body text-center"><p class="mb-2">Your wishlist is empty.</p><a class="btn btn-primary align-self-center" asp-page="/Products/Index">Browse products</a></div>
+    return;
+}
+
+<div class="row row-cols-2 row-cols-md-3 row-cols-lg-4 g-3">
+    @foreach (var item in Items)
+    {
+        <div class="col">
+            <div class="card h-100 @(item.Available ? "" : "unavailable")">
+                @if (!string.IsNullOrEmpty(item.ThumbUrl)) { <img class="card-img-top" src="@Format.Media(item.ThumbUrl)" alt="@item.Name" loading="lazy" width="320" height="320" /> }
+                <div class="card-body d-flex flex-column">
+                    <a class="fw-semibold text-decoration-none text-reset" asp-page="/Products/Details" asp-route-id="@item.ProductId">@item.Name</a>
+                    <div class="price mb-1">@Format.Tk(item.FinalPrice)</div>
+                    @if (item.Problem is not null) { <div class="small text-danger mb-2" role="status">@item.Problem</div> }
+                    <div class="mt-auto d-flex gap-2">
+                        <form method="post" asp-page-handler="Move" asp-route-id="@item.ProductId" asp-route-hasVariants="@item.HasVariants">
+                            <button class="btn btn-primary btn-sm" type="submit" disabled="@(!item.Available)">@(item.HasVariants ? "Choose option" : "Move to cart")</button>
+                        </form>
+                        <form method="post" asp-page-handler="Toggle" asp-route-id="@item.ProductId"><button class="btn btn-outline-secondary btn-sm" type="submit">Remove</button></form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>

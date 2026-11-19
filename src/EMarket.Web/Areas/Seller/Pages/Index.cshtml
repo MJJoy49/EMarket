@@ -1,0 +1,46 @@
+@page "/seller"
+@using EMarket.Shared.Dtos.Sellers
+@{
+    ViewData["Title"] = "Seller dashboard";
+}
+@functions {
+    public SellerDashboardDto? Dashboard { get; private set; }
+
+    public async Task OnGetAsync()
+    {
+        var result = await Api.GetAsync<SellerDashboardDto>("api/v1/seller/dashboard");
+        if (!Failed(result)) { Dashboard = result.Data; }
+    }
+}
+
+<h1 class="h3">Dashboard</h1>
+@if (Dashboard is null) { <p class="text-muted">The dashboard is not available right now.</p> return; }
+
+<div class="row g-3 mb-3">
+    @foreach (var (label, value, link) in new (string, string, string?)[]
+    {
+        ("New orders", Dashboard.NewOrders.ToString(), "/seller/orders?status=Pending"), ("To ship", Dashboard.ToShip.ToString(), "/seller/orders?status=Confirmed"),
+        ("Products", Dashboard.ProductCount.ToString(), "/seller/products"), ("Low stock", Dashboard.LowStock.ToString(), "/seller/products"),
+        ("Returns waiting", Dashboard.ReturnsWaiting.ToString(), "/seller/returns?status=Requested"), ("Sales today", Format.Tk(Dashboard.SalesToday), null),
+        ("Sales, 7 days", Format.Tk(Dashboard.Sales7Days), null), ("Sales, 30 days", Format.Tk(Dashboard.Sales30Days), null),
+    })
+    {
+        <div class="col-6 col-md-3"><div class="stat-tile"><div class="text-muted small">@label</div><div class="value">@if (link is null) { @value } else { <a class="text-decoration-none text-reset" href="@link">@value</a> }</div></div></div>
+    }
+</div>
+
+<div class="row g-3 mb-3">
+    @foreach (var (label, value) in new[] { ("Available", Dashboard.Balances.Available), ("Pending", Dashboard.Balances.Pending), ("Reserved", Dashboard.Balances.Reserved), ("Paid out", Dashboard.Balances.PaidOut) })
+    {
+        <div class="col-6 col-md-3"><div class="stat-tile"><div class="text-muted small">@label</div><div class="value">@Format.Tk(value)</div></div></div>
+    }
+</div>
+@if (Dashboard.Balances.Negative) { <div class="alert alert-warning" role="status">Your balance is negative because of refunds after a payout. New earnings will cover it before the next payout.</div> }
+
+@{
+    var chartModel = ("Sales, last 30 days", (IReadOnlyList<(string Label, decimal Value)>)Dashboard.Chart.Select(d => (d.Day.ToString("dd/MM"), d.Sales)).ToList());
+}
+<section class="card card-body" aria-labelledby="chart-title">
+    <h2 class="h5" id="chart-title">Sales, last 30 days</h2>
+    <partial name="_BarChart" model="chartModel" />
+</section>

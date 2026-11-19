@@ -20,7 +20,7 @@ public sealed record OrderDetailDto(
     string ShipPhone, string ShipAddress, decimal ItemsTotal, decimal DeliveryFee, decimal Discount, decimal CreditUsed, decimal Total,
     string? CourierName, string? TrackingNote, DateTime? DeliveredAt, string PaymentMethod, string PaymentStatus,
     IReadOnlyList<OrderItemDto> Items, IReadOnlyList<StatusChangeDto> History, IReadOnlyList<PaymentInfoDto> Payments,
-    IReadOnlyList<RefundInfoDto> Refunds, IReadOnlyList<string> AllowedActions, DateTime? PayBefore);
+    IReadOnlyList<RefundInfoDto> Refunds, IReadOnlyList<string> AllowedActions, DateTime? PayBefore, Guid CheckoutGroupId);
 
 public sealed class CancelRequest
 {

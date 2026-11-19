@@ -1,0 +1,91 @@
+@page "/orders/{orderId:guid}/return"
+@using System.Text.Json
+@using EMarket.Shared.Dtos.AfterSale
+@using EMarket.Shared.Dtos.Orders
+@{
+    ViewData["Title"] = "Return request";
+}
+@functions {
+    [FromRoute] public Guid OrderId { get; set; }
+    [BindProperty] public string Reason { get; set; } = "Damaged";
+    [BindProperty] public string? Description { get; set; }
+    [BindProperty] public string RefundMethod { get; set; } = "OriginalMethod";
+    public OrderDetailDto? Order { get; private set; }
+    public bool PaidOnline => Order is { PaymentMethod: not "COD" } && Order.Payments.Any(p => p.Status is "Paid" or "PartlyRefunded");
+
+    public async Task<IActionResult> OnGetAsync(bool notReceived = false)
+    {
+        if (notReceived) { Reason = "NotReceived"; }
+        return await LoadAsync() ? Page() : RedirectToPage("/Orders/Index");
+    }
+
+    public async Task<IActionResult> OnPostAsync(List<IFormFile>? photos)
+    {
+        if (!await LoadAsync()) { return RedirectToPage("/Orders/Index"); }
+
+        // One quantity box per item; an item with a quantity above 0 is part of the request (FR-13.2).
+        var items = Order!.Items
+            .Select(i => (i.Id, Quantity: int.TryParse(Request.Form[$"qty_{i.Id}"], out var q) ? q : 0))
+            .Where(i => i.Quantity > 0).Select(i => new { orderItemId = i.Id, quantity = i.Quantity }).ToList();
+        if (items.Count == 0) { ModelState.AddModelError(string.Empty, "Choose at least one item and a quantity."); return Page(); }
+
+        var files = new List<FormFilePart>();
+        foreach (var photo in (photos ?? []).Where(p => p.Length > 0).Take(3))
+        {
+            using var memory = new MemoryStream();
+            await photo.CopyToAsync(memory);
+            files.Add(new FormFilePart("photos", photo.FileName, memory.ToArray()));
+        }
+
+        var payload = JsonSerializer.Serialize(new { items, reason = Reason, description = Description, refundMethod = RefundMethod });
+        var result = await Api.PostFormAsync<JsonElement>($"api/v1/returns/orders/{OrderId}", new Dictionary<string, string?> { ["payload"] = payload }, files);
+        if (!result.Ok) { ModelState.AddModelError(string.Empty, result.Message); return Page(); }
+        Success(Messages.ReturnSent);
+        return RedirectToPage("/Returns/Show", new { id = result.Data.GetProperty("id").GetGuid() });
+    }
+
+    private async Task<bool> LoadAsync()
+    {
+        var result = await Api.GetAsync<OrderDetailDto>($"api/v1/orders/{OrderId}");
+        if (Failed(result)) { return false; }
+        Order = result.Data;
+        return true;
+    }
+}
+
+@if (Order is null) { return; }
+<h1 class="h3">Return request &middot; Order @Order.OrderNumber</h1>
+<form class="card card-body" method="post" enctype="multipart/form-data" style="max-width: 720px" novalidate>
+    <div asp-validation-summary="All" class="text-danger mb-2" role="alert"></div>
+    <fieldset class="mb-3">
+        <legend class="h6">Items to return</legend>
+        @foreach (var item in Order.Items)
+        {
+            var left = item.Quantity - item.ReturnedQuantity;
+            <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+                <label for="qty_@item.Id">@item.ProductName@(string.IsNullOrEmpty(item.VariantText) ? "" : $" ({item.VariantText})") <span class="text-muted small">up to @left</span></label>
+                <input class="form-control" style="width:5rem" id="qty_@item.Id" name="qty_@item.Id" type="number" min="0" max="@left" value="@(left > 0 && Order.Items.Count == 1 ? 1 : 0)" disabled="@(left <= 0)" />
+            </div>
+        }
+    </fieldset>
+    <div class="mb-3"><label class="form-label" for="reason">Reason <span aria-hidden="true">*</span></label>
+        <select class="form-select" id="reason" name="Reason" required>
+            @foreach (var (value, text) in new[] { ("Damaged", "Damaged"), ("WrongItem", "Wrong item"), ("NotAsDescribed", "Not as described"), ("NotReceived", "Not received"), ("Other", "Other") })
+            {
+                <option value="@value" selected="@(Reason == value)">@text</option>
+            }
+        </select></div>
+    <div class="mb-3"><label class="form-label" for="description">Details</label><textarea class="form-control" id="description" name="Description" rows="3" maxlength="500">@Description</textarea></div>
+    <div class="mb-3"><label class="form-label" for="photos">Photos (up to 3, JPG or PNG, 2 MB each)</label><input class="form-control" id="photos" name="photos" type="file" accept="image/jpeg,image/png" multiple /></div>
+    @if (PaidOnline)
+    {
+        <div class="mb-3"><label class="form-label" for="method">Refund method <span aria-hidden="true">*</span></label>
+            <select class="form-select" id="method" name="RefundMethod">
+                <option value="OriginalMethod" selected="@(RefundMethod == "OriginalMethod")">Back to my payment method</option>
+                <option value="StoreCredit" selected="@(RefundMethod == "StoreCredit")">Store credit</option>
+            </select></div>
+    }
+    else { <p class="text-muted">Cash payments and store credit are refunded as store credit.</p><input type="hidden" name="RefundMethod" value="StoreCredit" /> }
+    <p class="small text-muted">The refund is the item price minus its share of any coupon. The delivery fee is refunded when the seller is at fault or the whole order is returned.</p>
+    <div class="d-flex gap-2"><button class="btn btn-primary" type="submit">Submit request</button><a class="btn btn-outline-secondary" asp-page="/Orders/Details" asp-route-id="@Order.Id">Cancel</a></div>
+</form>

@@ -1,0 +1,40 @@
+@page "/verify-email"
+@using EMarket.Shared.Dtos.Auth
+@{
+    ViewData["Title"] = "Verify email";
+}
+@functions {
+    public bool Verified { get; private set; }
+    public string? Error { get; private set; }
+
+    public async Task OnGetAsync(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token)) { Error = Messages.BadLink; return; }
+        var result = await Api.PostAsync<Empty>("api/v1/auth/verify-email", new TokenRequest { Token = token });
+        Verified = result.Ok;
+        Error = result.Ok ? null : result.Message;
+    }
+
+    // FR-1.7: a new link, at most 3 times in one hour.
+    public async Task<IActionResult> OnPostResendAsync()
+    {
+        if (User.Identity?.IsAuthenticated != true) { return RedirectToPage("/Account/Login", new { returnUrl = "/verify-email" }); }
+        var result = await Api.PostAsync<Empty>("api/v1/auth/resend-verification");
+        if (result.Ok) { Success("A new verification link was sent. Please check your email."); } else { Problem(result.Message); }
+        return LocalRedirectOr(Request.Headers.Referer.ToString() is { Length: > 0 } r && Uri.TryCreate(r, UriKind.Absolute, out var u) ? u.PathAndQuery : null, "/Index");
+    }
+}
+
+<div class="row justify-content-center"><div class="col-md-7 col-lg-6 text-center">
+    <h1 class="h3">Verify email</h1>
+    @if (Verified)
+    {
+        <p class="lead" role="status">Your email is verified. You can now log in and order.</p>
+        <a class="btn btn-primary" asp-page="/Account/Login">Log in</a>
+    }
+    else
+    {
+        <p class="lead" role="alert">@(Error ?? Messages.BadLink)</p>
+        <form method="post" asp-page-handler="Resend"><button class="btn btn-outline-primary" type="submit">Resend verification link</button></form>
+    }
+</div></div>

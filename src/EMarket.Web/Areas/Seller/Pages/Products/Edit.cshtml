@@ -1,0 +1,171 @@
+@page "/seller/products/edit/{id:guid?}"
+@using System.Text.Json
+@{
+    ViewData["Title"] = Id is null ? "Add product" : "Edit product";
+}
+@functions {
+    [FromRoute] public Guid? Id { get; set; }
+    [BindProperty] public SaveProductRequest Input { get; set; } = new();
+    [BindProperty] public int Rows { get; set; } = 3;
+    public SellerProductDetailDto? Existing { get; private set; }
+    public IReadOnlyList<(Guid Id, string Label)> Leaves { get; private set; } = [];
+
+    public async Task<IActionResult> OnGetAsync()
+    {
+        await LoadCategoriesAsync();
+        if (Id is null) { return Page(); }
+        var result = await Api.GetAsync<SellerProductDetailDto>($"api/v1/seller/products/{Id}");
+        if (Failed(result)) { return RedirectToPage("/Products/Index"); }
+        Existing = result.Data;
+        Input = new SaveProductRequest
+        {
+            Name = Existing!.Name, CategoryId = Existing.CategoryId, Brand = Existing.Brand, Description = Existing.Description, Price = Existing.Price,
+            DiscountPrice = Existing.DiscountPrice, Stock = Existing.Stock,
+            Variants = Existing.Variants.Where(v => v.IsActive).Select(v =>
+            {
+                var parts = v.OptionText.Split(" / ");
+                return new VariantInput { Id = v.Id, Colour = parts.ElementAtOrDefault(0), Size = parts.ElementAtOrDefault(1), Sku = v.Sku, Stock = v.Stock, Price = v.Price == Existing.Price ? null : v.Price };
+            }).ToList(),
+        };
+        Rows = Math.Max(3, Input.Variants.Count + 1);
+        return Page();
+    }
+
+    // A blank row is added without any script; what was typed stays.
+    public async Task<IActionResult> OnPostAddRowAsync()
+    {
+        ModelState.Clear();
+        Rows++;
+        await LoadAsync();
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostSaveAsync(bool submit)
+    {
+        // Rows left empty are dropped (FR-4.14: a draft needs no variants).
+        Input.Variants = Input.Variants.Where(v => !string.IsNullOrWhiteSpace(v.Sku) || !string.IsNullOrWhiteSpace(v.Colour) || !string.IsNullOrWhiteSpace(v.Size)).ToList();
+        ModelState.Clear();
+        TryValidateModel(Input, nameof(Input));
+        if (!ModelState.IsValid) { await LoadAsync(); return Page(); }
+
+        ApiResult<JsonElement> result = Id is null
+            ? await Api.PostAsync<JsonElement>("api/v1/seller/products", Input)
+            : await Api.PutAsync<JsonElement>($"api/v1/seller/products/{Id}", Input);
+        if (!result.Ok) { await LoadAsync(); AddErrors(result); return Page(); }
+
+        var productId = Id ?? result.Data.GetProperty("id").GetGuid();
+        if (submit && Id is not null)
+        {
+            var sent = await Api.PostAsync<JsonElement>($"api/v1/seller/products/{productId}/submit");
+            if (sent.Ok) { Success(Messages.ProductSubmitted); } else { Problem(sent.Message); }
+        }
+        else
+        {
+            Success(Id is null ? "Saved as a draft. Add at least one image, then submit it for approval." : Messages.Saved);
+        }
+
+        return RedirectToPage(new { id = productId });
+    }
+
+    public async Task<IActionResult> OnPostUploadAsync(IFormFile? file)
+    {
+        if (file is null) { Problem(Messages.BadFile); return RedirectToPage(new { id = Id }); }
+        using var memory = new MemoryStream();
+        await file.CopyToAsync(memory);
+        var result = await Api.PostFormAsync<JsonElement>($"api/v1/seller/products/{Id}/images", new Dictionary<string, string?>(), [new FormFilePart("file", file.FileName, memory.ToArray())]);
+        if (!Failed(result)) { Success(Messages.Saved); }
+        return RedirectToPage(new { id = Id });
+    }
+
+    public async Task<IActionResult> OnPostRemoveImageAsync(Guid imageId)
+    {
+        if (!Failed(await Api.DeleteAsync<Empty>($"api/v1/seller/products/{Id}/images/{imageId}"))) { Success(Messages.Saved); }
+        return RedirectToPage(new { id = Id });
+    }
+
+    private async Task LoadAsync()
+    {
+        await LoadCategoriesAsync();
+        if (Id is not null) { Existing = (await Api.GetAsync<SellerProductDetailDto>($"api/v1/seller/products/{Id}")).Data; }
+        Rows = Math.Max(Rows, Input.Variants.Count);
+    }
+
+    private async Task LoadCategoriesAsync()
+    {
+        var tree = (await Api.GetAsync<List<CategoryDto>>("api/v1/categories")).Data ?? [];
+        // A product sits in a leaf category (SRS 4.7): a main category without children, or a sub-category.
+        Leaves = tree.SelectMany(main => main.Children.Count == 0 ? [(main.Id, main.Name)] : main.Children.Select(c => (c.Id, $"{main.Name} / {c.Name}"))).ToList();
+    }
+}
+
+<h1 class="h3">@(Id is null ? "Add product" : "Edit product")</h1>
+@if (Existing is { Status: "Rejected", RejectionReason: not null }) { <div class="alert alert-danger" role="status"><strong>Rejected:</strong> @Existing.RejectionReason</div> }
+@if (Existing is { Status: "Active" }) { <div class="alert alert-info" role="status">Changing the name, description, category or images of an active product sends it for approval again. Price and stock changes do not.</div> }
+
+<form class="card card-body mb-4" method="post" novalidate>
+    <input type="hidden" name="Rows" value="@Rows" />
+    <div asp-validation-summary="All" class="text-danger mb-2" role="alert"></div>
+    <div class="row g-3">
+        <div class="col-md-8"><label class="form-label" asp-for="Input.Name">Name <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.Name" minlength="3" maxlength="150" required /></div>
+        <div class="col-md-4"><label class="form-label" asp-for="Input.Brand">Brand</label><input class="form-control" asp-for="Input.Brand" maxlength="100" /></div>
+        <div class="col-md-6"><label class="form-label" asp-for="Input.CategoryId">Category <span aria-hidden="true">*</span></label>
+            <select class="form-select" asp-for="Input.CategoryId" required><option value="">Select</option>@foreach (var (id, label) in Leaves) { <option value="@id" selected="@(Input.CategoryId == id)">@label</option> }</select></div>
+        <div class="col-md-6"><label class="form-label" asp-for="Input.Stock">Stock (when there are no variants)</label><input class="form-control" asp-for="Input.Stock" type="number" min="0" max="100000" /></div>
+        <div class="col-md-6"><label class="form-label" asp-for="Input.Price">Price (Tk) <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.Price" type="number" min="1" max="10000000" step="0.01" required /></div>
+        <div class="col-md-6"><label class="form-label" asp-for="Input.DiscountPrice">Discount price (Tk, lower than the price)</label><input class="form-control" asp-for="Input.DiscountPrice" type="number" min="1" step="0.01" /></div>
+        <div class="col-12"><label class="form-label" asp-for="Input.Description">Description <span aria-hidden="true">*</span></label><textarea class="form-control" asp-for="Input.Description" rows="5" maxlength="4000" required></textarea></div>
+    </div>
+
+    <h2 class="h5 mt-4">Variants</h2>
+    <p class="text-muted small">Leave empty for a product without colour or size. Each variant needs a colour or a size, a SKU that is unique in your shop, and its own stock.</p>
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead><tr><th scope="col">Colour</th><th scope="col">Size</th><th scope="col">SKU</th><th scope="col">Stock</th><th scope="col">Own price</th></tr></thead>
+            <tbody>
+                @for (var i = 0; i < Math.Max(Rows, Input.Variants.Count); i++)
+                {
+                    var v = i < Input.Variants.Count ? Input.Variants[i] : new VariantInput();
+                    <tr>
+                        <td><input type="hidden" name="Input.Variants[@i].Id" value="@v.Id" /><label class="visually-hidden" for="vc@(i)">Colour</label><input class="form-control" id="vc@(i)" name="Input.Variants[@i].Colour" value="@v.Colour" maxlength="30" /></td>
+                        <td><label class="visually-hidden" for="vs@(i)">Size</label><input class="form-control" id="vs@(i)" name="Input.Variants[@i].Size" value="@v.Size" maxlength="30" /></td>
+                        <td><label class="visually-hidden" for="vk@(i)">SKU</label><input class="form-control" id="vk@(i)" name="Input.Variants[@i].Sku" value="@v.Sku" minlength="3" maxlength="40" /></td>
+                        <td><label class="visually-hidden" for="vt@(i)">Stock</label><input class="form-control" id="vt@(i)" name="Input.Variants[@i].Stock" type="number" min="0" max="100000" value="@v.Stock" /></td>
+                        <td><label class="visually-hidden" for="vp@(i)">Own price</label><input class="form-control" id="vp@(i)" name="Input.Variants[@i].Price" type="number" min="1" step="0.01" value="@v.Price" /></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <button class="btn btn-outline-secondary" type="submit" asp-page-handler="AddRow" formnovalidate>Add variant</button>
+        <button class="btn btn-outline-primary" type="submit" asp-page-handler="Save">Save as draft</button>
+        @if (Id is not null && Existing?.Status is "Draft" or "Rejected") { <button class="btn btn-primary" type="submit" asp-page-handler="Save" asp-route-submit="true">Submit for approval</button> }
+        else { <button class="btn btn-primary" type="submit" asp-page-handler="Save">Save changes</button> }
+        <a class="btn btn-outline-secondary" asp-page="/Products/Index">Cancel</a>
+    </div>
+</form>
+
+@if (Id is not null && Existing is not null)
+{
+    <section class="card card-body" aria-labelledby="images">
+        <h2 class="h5" id="images">Images (1 to 5, JPG or PNG, up to 2 MB each)</h2>
+        <div class="d-flex flex-wrap gap-3 mb-3">
+            @foreach (var image in Existing.Images)
+            {
+                <figure class="text-center mb-0">
+                    <img class="rounded border" src="@Format.Media(image.ThumbUrl)" alt="Product image @image.SortOrder" width="120" height="120" />
+                    <figcaption class="small">@(image.SortOrder == 1 ? "Main image" : $"Image {image.SortOrder}")</figcaption>
+                    <form method="post" asp-page-handler="RemoveImage" asp-route-imageId="@image.Id" data-confirm="Remove this image?"><button class="btn btn-link btn-sm text-danger p-0" type="submit">Remove</button></form>
+                </figure>
+            }
+        </div>
+        @if (Existing.Images.Count < 5)
+        {
+            <form class="d-flex flex-wrap gap-2" method="post" asp-page-handler="Upload" enctype="multipart/form-data">
+                <label class="visually-hidden" for="image">Choose an image</label>
+                <input class="form-control w-auto" id="image" name="file" type="file" accept="image/jpeg,image/png" required />
+                <button class="btn btn-outline-primary" type="submit">Upload image</button>
+            </form>
+        }
+    </section>
+}

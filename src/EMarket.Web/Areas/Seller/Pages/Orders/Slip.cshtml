@@ -1,0 +1,30 @@
+@page "/seller/orders/{id:guid}/slip"
+@using EMarket.Shared.Dtos.Orders
+@{
+    ViewData["Title"] = "Packing slip";
+}
+@functions {
+    [FromRoute] public Guid Id { get; set; }
+    public OrderDetailDto? Order { get; private set; }
+
+    public async Task<IActionResult> OnGetAsync()
+    {
+        var result = await Api.GetAsync<OrderDetailDto>($"api/v1/seller/orders/{Id}");
+        if (result.Status == 404) { return NotFound(); }
+        if (Failed(result)) { return RedirectToPage("/Orders/Index"); }
+        Order = result.Data;
+        return Page();
+    }
+}
+
+@if (Order is null) { return; }
+<article class="card card-body">
+    <h1 class="h4">Packing slip &middot; @Order.OrderNumber</h1>
+    <p class="mb-2"><strong>Deliver to:</strong> @Order.ShipName, @Order.ShipAddress, @Order.ShipPhone</p>
+    <table class="table table-sm">
+        <thead><tr><th scope="col">Item</th><th scope="col">Qty</th></tr></thead>
+        <tbody>@foreach (var i in Order.Items) { <tr><td>@i.ProductName@(string.IsNullOrEmpty(i.VariantText) ? "" : $" ({i.VariantText})")</td><td>@i.Quantity</td></tr> }</tbody>
+    </table>
+    <p class="mb-0 text-muted">Payment: @(Order.PaymentMethod == "COD" ? $"Cash on delivery, collect {Format.Tk(Order.Total)}" : "Paid online")</p>
+    <button class="btn btn-primary mt-3 align-self-start d-print-none" type="button" data-print>Print</button>
+</article>

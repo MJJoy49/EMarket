@@ -1,0 +1,42 @@
+@page "/register"
+@using EMarket.Shared.Dtos.Auth
+@{
+    ViewData["Title"] = "Register";
+}
+@functions {
+    [BindProperty] public RegisterRequest Input { get; set; } = new();
+
+    public IActionResult OnGet() => User.Identity?.IsAuthenticated == true ? RedirectToPage("/Index") : Page();
+
+    public async Task<IActionResult> OnPostAsync()
+    {
+        if (!ModelState.IsValid) { Input.Password = Input.ConfirmPassword = ""; return Page(); }
+        var result = await Api.PostAsync<System.Text.Json.JsonElement>("api/v1/auth/register", Input);
+        if (!result.Ok)
+        {
+            Input.Password = Input.ConfirmPassword = "";
+            AddErrors(result);
+            return Page();
+        }
+
+        Success(Messages.RegistrationDone);
+        return RedirectToPage("/Account/Login");
+    }
+}
+
+<div class="row justify-content-center"><div class="col-md-8 col-lg-6">
+    <h1 class="h3">Create account</h1>
+    <form class="card card-body" method="post" novalidate>
+        <div asp-validation-summary="ModelOnly" class="text-danger mb-2" role="alert"></div>
+        <div class="mb-3"><label class="form-label" asp-for="Input.FullName">Full name <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.FullName" autocomplete="name" required /><span class="text-danger" asp-validation-for="Input.FullName"></span></div>
+        <div class="mb-3"><label class="form-label" asp-for="Input.Email">Email <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.Email" type="email" autocomplete="email" required /><span class="text-danger" asp-validation-for="Input.Email"></span></div>
+        <div class="mb-3"><label class="form-label" asp-for="Input.Phone">Mobile <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.Phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="01XXXXXXXXX" required /><span class="text-danger" asp-validation-for="Input.Phone"></span></div>
+        <div class="mb-3"><label class="form-label" asp-for="Input.Password">Password <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.Password" type="password" autocomplete="new-password" aria-describedby="pw-hint" required /><div id="pw-hint" class="form-text">8 to 64 characters with an uppercase letter, a lowercase letter and a number.</div><span class="text-danger" asp-validation-for="Input.Password"></span></div>
+        <div class="mb-3"><label class="form-label" asp-for="Input.ConfirmPassword">Confirm password <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.ConfirmPassword" type="password" autocomplete="new-password" required /><span class="text-danger" asp-validation-for="Input.ConfirmPassword"></span></div>
+        <div class="form-check mb-3"><input class="form-check-input" asp-for="Input.AcceptTerms" required /><label class="form-check-label" asp-for="Input.AcceptTerms">I accept the <a asp-page="/Pages/Show" asp-route-slug="terms">Terms</a> and <a asp-page="/Pages/Show" asp-route-slug="privacy">Privacy Policy</a> <span aria-hidden="true">*</span></label><div><span class="text-danger" asp-validation-for="Input.AcceptTerms"></span></div></div>
+        <button class="btn btn-primary w-100" type="submit">Register</button>
+        <p class="mt-3 mb-0 small">Already have an account? <a asp-page="/Account/Login">Log in</a></p>
+    </form>
+</div></div>
+
+@section Scripts { <partial name="_ValidationScriptsPartial" /> }

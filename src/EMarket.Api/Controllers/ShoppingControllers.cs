@@ -15,6 +15,9 @@ public sealed class CartController(CartService carts) : ApiControllerBase
     [HttpGet]
     public Task<CartDto> Get(CancellationToken ct) => carts.GetAsync(UserId, ct);
 
+    [HttpGet("count")]
+    public async Task<IActionResult> Count(CancellationToken ct) => Ok(new { count = await carts.CountAsync(UserId, ct) });
+
     [HttpPost("items")]
     public async Task<IActionResult> Add(AddToCartRequest request, CancellationToken ct)
     {

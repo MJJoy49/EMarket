@@ -1,0 +1,42 @@
+@page "/pages/contact"
+@using System.ComponentModel.DataAnnotations
+@using EMarket.Shared.Dtos.Admin
+@{
+    ViewData["Title"] = "Contact us";
+}
+@functions {
+    [BindProperty] public ContactRequest Input { get; set; } = new();
+
+    public void OnGet()
+    {
+        if (User.Identity?.IsAuthenticated == true) { Input.Name = User.Identity.Name ?? ""; }
+    }
+
+    public async Task<IActionResult> OnPostAsync()
+    {
+        if (!ModelState.IsValid) { return Page(); }
+        var result = await Api.PostAsync<System.Text.Json.JsonElement>("api/v1/contact", Input);
+        if (!result.Ok)
+        {
+            AddErrors(result);
+            return Page(); // the form keeps what the user typed (FR-22.4)
+        }
+
+        Success(Messages.Saved);
+        return RedirectToPage();
+    }
+}
+
+<h1 class="h3">Contact us</h1>
+<form class="card card-body" method="post" style="max-width: 640px" novalidate>
+    <div asp-validation-summary="ModelOnly" class="text-danger" role="alert"></div>
+    <div class="mb-3"><label class="form-label" asp-for="Input.Name">Name <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.Name" autocomplete="name" required /><span class="text-danger" asp-validation-for="Input.Name"></span></div>
+    <div class="mb-3"><label class="form-label" asp-for="Input.Email">Email <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.Email" type="email" autocomplete="email" required /><span class="text-danger" asp-validation-for="Input.Email"></span></div>
+    <div class="mb-3"><label class="form-label" asp-for="Input.Subject">Subject <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.Subject" required maxlength="100" /><span class="text-danger" asp-validation-for="Input.Subject"></span></div>
+    <div class="mb-3"><label class="form-label" asp-for="Input.Message">Message <span aria-hidden="true">*</span></label><textarea class="form-control" asp-for="Input.Message" rows="5" required maxlength="2000"></textarea><span class="text-danger" asp-validation-for="Input.Message"></span></div>
+    @* A field only a script fills: a message that has it is dropped silently (FR-23.2). *@
+    <div class="visually-hidden" aria-hidden="true"><label for="Input_Website">Leave this empty</label><input asp-for="Input.Website" tabindex="-1" autocomplete="off" /></div>
+    <button class="btn btn-primary" type="submit">Send message</button>
+</form>
+
+@section Scripts { <partial name="_ValidationScriptsPartial" /> }

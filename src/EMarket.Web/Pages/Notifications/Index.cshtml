@@ -1,0 +1,57 @@
+@page "/notifications"
+@using EMarket.Shared.Dtos.AfterSale
+@using EMarket.Shared.Results
+@{
+    ViewData["Title"] = "Notifications";
+}
+@functions {
+    public PagedResult<NotificationDto>? Items { get; private set; }
+    public bool UnreadOnly => Request.Query["unreadOnly"].ToString().StartsWith("true");
+
+    public async Task OnGetAsync()
+    {
+        var result = await Api.GetAsync<PagedResult<NotificationDto>>($"api/v1/notifications?unreadOnly={UnreadOnly.ToString().ToLower()}&page={Math.Max(1, int.TryParse(Request.Query["page"], out var p) ? p : 1)}");
+        if (!Failed(result)) { Items = result.Data; }
+    }
+
+    public async Task<IActionResult> OnPostReadAsync(Guid id, string? link)
+    {
+        Failed(await Api.PostAsync<Empty>($"api/v1/notifications/{id}/read"));
+        return IsLocal(link) ? LocalRedirect(link!) : RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostReadAllAsync() { Failed(await Api.PostAsync<Empty>("api/v1/notifications/read-all")); return RedirectToPage(); }
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <h1 class="h3 mb-0">Notifications</h1>
+    <div class="d-flex gap-2">
+        <a class="btn @(UnreadOnly ? "btn-outline-primary" : "btn-primary")" asp-page="/Notifications/Index">All</a>
+        <a class="btn @(UnreadOnly ? "btn-primary" : "btn-outline-primary")" asp-page="/Notifications/Index" asp-route-unreadOnly="true">Unread</a>
+        <form method="post" asp-page-handler="ReadAll"><button class="btn btn-outline-secondary" type="submit">Mark all as read</button></form>
+    </div>
+</div>
+
+@if (Items is null || Items.Items.Count == 0)
+{
+    <p class="text-muted">Nothing here yet.</p>
+}
+else
+{
+    <ul class="list-group mb-3">
+        @foreach (var n in Items.Items)
+        {
+            <li class="list-group-item d-flex flex-wrap justify-content-between align-items-start gap-2">
+                <div>
+                    <div class="@(n.IsRead ? "" : "fw-bold")">@if (!n.IsRead) { <span class="badge text-bg-primary me-1">New</span> }@n.Title</div>
+                    <div class="text-muted small">@n.Message</div>
+                    <div class="text-muted small">@Format.DateTime(n.CreatedAt)</div>
+                </div>
+                <form method="post" asp-page-handler="Read" asp-route-id="@n.Id" asp-route-link="@n.LinkUrl">
+                    <button class="btn btn-outline-secondary btn-sm" type="submit">@(string.IsNullOrEmpty(n.LinkUrl) ? "Mark as read" : "Open")</button>
+                </form>
+            </li>
+        }
+    </ul>
+    <partial name="_Pager" model="(Items.Page, Items.TotalPages)" />
+}

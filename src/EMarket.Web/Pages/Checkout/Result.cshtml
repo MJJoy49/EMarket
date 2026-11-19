@@ -1,0 +1,17 @@
+@page "/checkout/result"
+@functions {
+    // The gateway page sends the buyer back here. The status was already read from the gateway by the API (FR-9.5);
+    // this page only tells the buyer what happened and sends them on.
+    public IActionResult OnGet(string? status)
+    {
+        switch (status)
+        {
+            case "Paid": Success("Payment received. Your orders are confirmed."); break;
+            case "Cancelled": Problem(Messages.PaymentCancelled); break;
+            case "Failed": Problem(Messages.PaymentFailed); break;
+            default: Success("We are confirming your payment. This can take a few minutes."); break;
+        }
+
+        return RedirectToPage("/Orders/Index");
+    }
+}

@@ -1,0 +1,31 @@
+@page "/pages/{slug}"
+@{
+    ViewData["Title"] = Page_?.Title ?? "Page";
+}
+@functions {
+    [FromRoute] public string Slug { get; set; } = "";
+    public EMarket.Shared.Dtos.Admin.StaticPageDto? Page_ { get; private set; }
+
+    public async Task<IActionResult> OnGetAsync()
+    {
+        var result = await Api.GetAsync<EMarket.Shared.Dtos.Admin.StaticPageDto>($"api/v1/pages/{Uri.EscapeDataString(Slug)}");
+        if (result.Status == 404) { return NotFound(); }
+        Page_ = result.Data;
+        if (Failed(result)) { return RedirectToPage("/Index"); }
+        return Page();
+    }
+}
+
+@if (Page_ is null) { return; }
+<nav class="d-flex flex-wrap gap-3 mb-3" aria-label="Information pages">
+    @foreach (var (slug, title) in new[] { ("about", "About"), ("faq", "FAQ"), ("terms", "Terms"), ("privacy", "Privacy"), ("seller-terms", "Seller Terms") })
+    {
+        <a asp-page="/Pages/Show" asp-route-slug="@slug" aria-current="@(slug == Slug ? "page" : null)">@title</a>
+    }
+    <a asp-page="/Pages/Contact">Contact</a>
+</nav>
+<article class="card card-body">
+    <h1 class="h3">@Page_.Title</h1>
+    @* The API cleans this HTML with an allow-list before saving it (NFR-34). *@
+    @Html.Raw(Page_.Html)
+</article>

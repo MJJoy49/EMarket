@@ -1,0 +1,70 @@
+@page "/seller/returns"
+@using EMarket.Shared.Dtos.AfterSale
+@using EMarket.Shared.Results
+@{
+    ViewData["Title"] = "Return requests";
+    var tabs = new[] { ("", "All"), ("Requested", "Waiting for you"), ("Approved", "Approved"), ("ItemReceived", "Item received"), ("Refunded", "Refunded"), ("Rejected", "Rejected") };
+}
+@functions {
+    public PagedResult<ReturnDto>? Requests { get; private set; }
+    public string Current => Request.Query["status"].ToString();
+
+    public async Task OnGetAsync()
+    {
+        var result = await Api.GetAsync<PagedResult<ReturnDto>>($"api/v1/seller/returns?status={Uri.EscapeDataString(Current)}&page={Math.Max(1, int.TryParse(Request.Query["page"], out var p) ? p : 1)}");
+        if (!Failed(result)) { Requests = result.Data; }
+    }
+
+    public async Task<IActionResult> OnPostDecideAsync(Guid id, bool approve, string? reason)
+    {
+        if (!Failed(await Api.PostAsync<Empty>($"api/v1/seller/returns/{id}/decision", new { approve, reason }))) { Success(Messages.Saved); }
+        return RedirectToPage(new { status = Current });
+    }
+
+    public async Task<IActionResult> OnPostReceivedAsync(Guid id, bool resellable)
+    {
+        if (!Failed(await Api.PostAsync<Empty>($"api/v1/seller/returns/{id}/item-received", new { resellable }))) { Success("Marked as received. The refund has started."); }
+        return RedirectToPage(new { status = Current });
+    }
+}
+
+<h1 class="h3">Return requests</h1>
+<ul class="nav nav-pills mb-3 flex-wrap" aria-label="Return status">
+    @foreach (var (value, text) in tabs) { <li class="nav-item"><a class="nav-link @(Current == value ? "active" : "")" asp-page="/Returns/Index" asp-route-status="@value">@text</a></li> }
+</ul>
+<p class="text-muted small">Please answer within 3 days. A request left longer goes to the admin.</p>
+
+@if (Requests is null || Requests.Items.Count == 0) { <p class="text-muted">No return requests here.</p> return; }
+@foreach (var r in Requests.Items)
+{
+    <article class="card card-body mb-3">
+        <div class="d-flex flex-wrap justify-content-between gap-2">
+            <h2 class="h6 mb-0">Order @r.OrderNumber &middot; @r.BuyerName</h2>
+            <span><span class="badge @Format.Badge(r.Status)">@Format.Status(r.Status)</span> <span class="text-muted small">@Format.Date(r.CreatedAt)</span></span>
+        </div>
+        <p class="mb-1"><strong>@Format.Status(r.Reason)</strong>@(string.IsNullOrWhiteSpace(r.Description) ? "" : $": {r.Description}")</p>
+        <ul class="mb-1">@foreach (var l in r.Items) { <li>@l.Quantity &times; @l.ProductName@(string.IsNullOrEmpty(l.VariantText) ? "" : $" ({l.VariantText})")</li> }</ul>
+        <p class="mb-2">Refund if approved: <strong>@Format.Tk(r.RefundAmount)</strong></p>
+        <div class="d-flex flex-wrap gap-1 mb-2">@for (var i = 0; i < r.PhotoUrls.Count; i++) { <img class="rounded border" src="/files/returns/@r.Id/@i" alt="Photo @(i + 1)" width="72" height="72" loading="lazy" /> }</div>
+        @if (r.AllowedActions.Contains("Approve"))
+        {
+            <div class="d-flex flex-wrap gap-2">
+                <form method="post" asp-page-handler="Decide" asp-route-id="@r.Id" asp-route-approve="true" data-confirm="Approve this return?"><button class="btn btn-primary btn-sm" type="submit">Approve</button></form>
+                <form class="d-flex gap-2" method="post" asp-page-handler="Decide" asp-route-id="@r.Id" asp-route-approve="false">
+                    <label class="visually-hidden" for="why-@r.Id">Reason for rejection</label>
+                    <input class="form-control form-control-sm" id="why-@r.Id" name="reason" minlength="10" maxlength="500" required placeholder="Reason for rejection (10 characters or more)" />
+                    <button class="btn btn-outline-danger btn-sm" type="submit">Reject</button>
+                </form>
+            </div>
+        }
+        @if (r.AllowedActions.Contains("ItemReceived"))
+        {
+            <form class="d-flex flex-wrap align-items-center gap-3" method="post" asp-page-handler="Received" asp-route-id="@r.Id" data-confirm="Confirm that the goods came back? The refund starts now.">
+                <div class="form-check"><input class="form-check-input" type="checkbox" id="res-@r.Id" name="resellable" value="true" /><label class="form-check-label" for="res-@r.Id">The goods can be sold again (stock goes back up)</label></div>
+                <button class="btn btn-primary btn-sm" type="submit">Item received</button>
+            </form>
+        }
+        @if (r.RejectionReason is not null) { <p class="text-danger small mb-0">Rejected: @r.RejectionReason</p> }
+    </article>
+}
+<partial name="_Pager" model="(Requests.Page, Requests.TotalPages)" />

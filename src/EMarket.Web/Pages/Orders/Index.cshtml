@@ -1,0 +1,77 @@
+@page "/orders"
+@using System.Text.Json
+@using EMarket.Shared.Dtos.Orders
+@using EMarket.Shared.Results
+@{
+    ViewData["Title"] = "My orders";
+    var tabs = new[] { ("", "All"), ("AwaitingPayment", "Awaiting payment"), ("Pending", "Pending"), ("Shipped", "Shipped"), ("Delivered", "Delivered"), ("Cancelled", "Cancelled") };
+}
+@functions {
+    public PagedResult<OrderListItemDto>? Orders { get; private set; }
+    public string Current => Request.Query["status"].ToString();
+
+    public async Task OnGetAsync()
+    {
+        var result = await Api.GetAsync<PagedResult<OrderListItemDto>>($"api/v1/orders?status={Uri.EscapeDataString(Current)}&page={Math.Max(1, int.TryParse(Request.Query["page"], out var p) ? p : 1)}");
+        if (!Failed(result)) { Orders = result.Data; }
+    }
+
+    // Pay now (FR-10.3): a new payment attempt, then the gateway page.
+    public async Task<IActionResult> OnPostPayAsync(Guid groupId)
+    {
+        var result = await Api.PostAsync<PaymentStartDto>($"api/v1/orders/groups/{groupId}/pay");
+        if (result.Ok && result.Data is not null) { return Redirect(result.Data.GatewayUrl); }
+        Problem(result.Message);
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostReorderAsync(Guid id) => await Orders_ReorderAsync(id);
+
+    private async Task<IActionResult> Orders_ReorderAsync(Guid id)
+    {
+        var result = await Api.PostAsync<JsonElement>($"api/v1/orders/{id}/reorder");
+        if (Failed(result)) { return RedirectToPage(); }
+        var skipped = result.Data.GetProperty("skipped").EnumerateArray().Select(x => x.GetString()).ToList();
+        Success(skipped.Count == 0 ? "The items were added to your cart." : $"Added to your cart. Not available now: {string.Join(", ", skipped)}.");
+        return RedirectToPage("/Cart/Index");
+    }
+}
+
+<h1 class="h3">My orders</h1>
+<ul class="nav nav-pills mb-3 flex-wrap" aria-label="Order status">
+    @foreach (var (value, text) in tabs)
+    {
+        <li class="nav-item"><a class="nav-link @(Current == value ? "active" : "")" asp-page="/Orders/Index" asp-route-status="@value" aria-current="@(Current == value ? "page" : null)">@text</a></li>
+    }
+</ul>
+
+@if (Orders is null || Orders.Items.Count == 0)
+{
+    <div class="card card-body text-center"><p class="mb-2">No orders here yet.</p><a class="btn btn-primary align-self-center" asp-page="/Products/Index">Start shopping</a></div>
+    return;
+}
+
+<table class="table align-middle table-cards">
+    <thead><tr><th scope="col">Order</th><th scope="col">Date</th><th scope="col">Shop</th><th scope="col">Total</th><th scope="col">Payment</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+    <tbody>
+        @foreach (var o in Orders.Items)
+        {
+            <tr>
+                <td data-label="Order"><a asp-page="/Orders/Details" asp-route-id="@o.Id">@o.OrderNumber</a></td>
+                <td data-label="Date">@Format.Date(o.CreatedAt)</td>
+                <td data-label="Shop">@o.ShopName</td>
+                <td data-label="Total">@Format.Tk(o.Total)</td>
+                <td data-label="Payment"><span class="badge @Format.Badge(o.PaymentStatus)">@Format.Status(o.PaymentStatus)</span></td>
+                <td data-label="Status"><span class="badge @Format.Badge(o.Status)">@Format.Status(o.Status)</span></td>
+                <td class="text-end">
+                    <div class="d-flex flex-wrap gap-1 justify-content-end">
+                        <a class="btn btn-outline-primary btn-sm" asp-page="/Orders/Details" asp-route-id="@o.Id">Track</a>
+                        @if (o.CanPay) { <form method="post" asp-page-handler="Pay" asp-route-groupId="@o.CheckoutGroupId"><button class="btn btn-accent btn-sm" type="submit">Pay now</button></form> }
+                        <form method="post" asp-page-handler="Reorder" asp-route-id="@o.Id"><button class="btn btn-outline-secondary btn-sm" type="submit">Reorder</button></form>
+                    </div>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+<partial name="_Pager" model="(Orders.Page, Orders.TotalPages)" />

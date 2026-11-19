@@ -22,6 +22,12 @@ public sealed class ProfileService(AppDbContext db, IFileStorage files, Notifier
             user.EmailConfirmed, user.Roles.Select(r => r.Name!).ToList(), credit);
     }
 
+    /// <summary>FR-24.7: the store credit history is the buyer's own ledger lines.</summary>
+    public async Task<IReadOnlyList<CreditLineDto>> CreditHistoryAsync(Guid userId, CancellationToken ct = default) =>
+        await db.LedgerEntries.AsNoTracking().Where(l => l.UserId == userId && l.Account == "StoreCredit")
+            .OrderByDescending(l => l.CreatedAt).Take(100)
+            .Select(l => new CreditLineDto(l.CreatedAt, l.Kind, l.Amount, l.Order != null ? l.Order.OrderNumber : null)).ToListAsync(ct);
+
     public async Task<bool> UpdateAsync(Guid userId, UpdateProfileRequest request, CancellationToken ct = default)
     {
         if (request.BirthDate > DateOnly.FromDateTime(clock.UtcNow))

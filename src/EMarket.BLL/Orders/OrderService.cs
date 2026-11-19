@@ -383,6 +383,6 @@ public sealed class OrderService(AppDbContext db, Ledger ledger, Notifier notifi
             o.OrderStatusHistories.OrderBy(h => h.CreatedAt).Select(h => new StatusChangeDto(h.FromStatus, h.ToStatus, h.CreatedAt, h.Note)).ToList(),
             actor == Actor.Seller ? [] : payments.Select(p => new PaymentInfoDto(p.Id, p.Method, p.Amount, p.Status, p.TransactionId, p.CreatedAt, p.PaidAt)).ToList(),
             o.Refunds.OrderBy(r => r.CreatedAt).Select(r => new RefundInfoDto(r.Id, r.Amount, r.Method, r.Status, r.CreatedAt)).ToList(),
-            actions, o.Status == OrderRules.AwaitingPayment ? o.CheckoutGroup.ExpiresAt : null);
+            actions, o.Status == OrderRules.AwaitingPayment ? o.CheckoutGroup.ExpiresAt : null, o.CheckoutGroupId);
     }
 }

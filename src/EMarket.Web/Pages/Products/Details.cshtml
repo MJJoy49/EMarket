@@ -1,0 +1,147 @@
+@page "/products/{id:guid}"
+@using System.Text.Json
+@using EMarket.Shared.Dtos.AfterSale
+@using EMarket.Shared.Results
+@{
+    ViewData["Title"] = Product?.Name ?? "Product";
+}
+@functions {
+    [FromRoute] public Guid Id { get; set; }
+    public ProductDetailDto? Product { get; private set; }
+    public PagedResult<ReviewDto>? Reviews { get; private set; }
+
+    public async Task<IActionResult> OnGetAsync()
+    {
+        var result = await Api.GetAsync<ProductDetailDto>($"api/v1/products/{Id}");
+        if (result.Status == 404) { return NotFound(); }
+        if (Failed(result)) { return RedirectToPage("/Products/Index"); }
+        Product = result.Data;
+        Reviews = (await Api.GetAsync<PagedResult<ReviewDto>>($"api/v1/reviews/products/{Id}?page={Math.Max(1, int.TryParse(Request.Query["page"], out var p) ? p : 1)}")).Data;
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostAddAsync(Guid? variantId, int quantity = 1, bool buyNow = false)
+    {
+        if (User.Identity?.IsAuthenticated != true)
+        {
+            return RedirectToPage("/Account/Login", new { returnUrl = $"/products/{Id}" }); // FR-6.1: a guest is sent to Login and comes back here
+        }
+
+        var result = await Api.PostAsync<JsonElement>("api/v1/cart/items", new { productId = Id, variantId, quantity });
+        if (Failed(result)) { return RedirectToPage(new { id = Id }); }
+        Success(Messages.AddedToCart);
+        return buyNow ? RedirectToPage("/Checkout/Index") : RedirectToPage(new { id = Id });
+    }
+}
+
+@if (Product is null) { return; }
+
+<nav aria-label="Breadcrumb"><ol class="breadcrumb">
+    <li class="breadcrumb-item"><a asp-page="/Index">Home</a></li>
+    <li class="breadcrumb-item"><a asp-page="/Products/Index" asp-route-categoryId="@Product.CategoryId">@Product.CategoryName</a></li>
+    <li class="breadcrumb-item active" aria-current="page">@Product.Name</li>
+</ol></nav>
+
+<div class="row g-4">
+    <div class="col-md-6">
+        @if (Product.Images.Count > 0)
+        {
+            <img class="img-fluid rounded mb-2 w-100" src="@Format.Media(Product.Images[0].Url)" alt="@Product.Name" width="640" height="640" />
+            <div class="d-flex gap-2 flex-wrap">
+                @foreach (var image in Product.Images)
+                {
+                    <img class="rounded border" src="@Format.Media(image.ThumbUrl)" alt="Photo @image.SortOrder of @Product.Name" width="72" height="72" loading="lazy" />
+                }
+            </div>
+        }
+    </div>
+    <div class="col-md-6">
+        <h1 class="h3">@Product.Name</h1>
+        <p class="mb-1">
+            @if (Product.ReviewCount > 0)
+            {
+                <span class="rating">&#9733; @Product.AverageRating.ToString("0.0")</span><span class="text-muted"> (@Product.ReviewCount reviews)</span>
+            }
+            else { <span class="text-muted">No reviews yet</span> }
+        </p>
+        <p class="mb-1">
+            <span class="h4 price" id="variant-price">@Format.Tk(Product.FinalPrice)</span>
+            @if (Product.DiscountPercent > 0)
+            {
+                <span class="price-old ms-2">@Format.Tk(Product.Price)</span>
+                <span class="badge text-bg-danger ms-1">Save @Product.DiscountPercent.ToString("0.##")%</span>
+            }
+        </p>
+        <p class="mb-2">Sold by <a asp-page="/Shops/Show" asp-route-slug="@Product.ShopSlug">@Product.ShopName</a></p>
+        <p class="mb-3" id="variant-stock" role="status">@(Product.InStock ? (Product.Stock <= 5 ? $"Only {Product.Stock} left" : "In stock") : "Out of stock")</p>
+
+        <form method="post" asp-page-handler="Add" asp-route-id="@Product.Id">
+            @if (Product.Variants.Count > 0)
+            {
+                <div class="mb-3">
+                    <label class="form-label" for="variant-picker">Choose an option <span aria-hidden="true">*</span></label>
+                    <select class="form-select" id="variant-picker" name="variantId" required data-variants="@JsonSerializer.Serialize(Product.Variants.Select(v => new { id = v.Id.ToString(), v.FinalPrice, v.Stock }))">
+                        <option value="">Select</option>
+                        @foreach (var variant in Product.Variants)
+                        {
+                            <option value="@variant.Id" disabled="@(variant.Stock <= 0)">@variant.OptionText@(variant.Stock <= 0 ? " (out of stock)" : "")</option>
+                        }
+                    </select>
+                </div>
+            }
+            <div class="mb-3">
+                <label class="form-label" for="quantity">Quantity</label>
+                <input class="form-control w-auto" id="quantity" name="quantity" type="number" min="1" max="10" value="1" />
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-primary" id="add-to-cart" type="submit" disabled="@(!Product.InStock)">Add to cart</button>
+                <button class="btn btn-accent" id="buy-now" type="submit" name="buyNow" value="true" disabled="@(!Product.InStock)">Buy now</button>
+            </div>
+        </form>
+        @if (User.Identity?.IsAuthenticated == true && !User.IsInRole("Admin"))
+        {
+            <form class="mt-2" method="post" asp-page="/Wishlist/Index" asp-page-handler="Toggle" asp-route-id="@Product.Id">
+                <input type="hidden" name="returnUrl" value="@Request.Path" />
+                <button class="btn btn-outline-secondary" type="submit">&#9825; Wishlist</button>
+            </form>
+        }
+    </div>
+</div>
+
+<section class="mt-5" aria-labelledby="desc">
+    <h2 class="h4" id="desc">Description</h2>
+    <p style="white-space: pre-line">@Product.Description</p>
+</section>
+
+<section class="mt-4" aria-labelledby="reviews">
+    <h2 class="h4" id="reviews">Reviews (@Product.ReviewCount)</h2>
+    @if (Reviews is null || Reviews.Items.Count == 0)
+    {
+        <p class="text-muted">No reviews yet.</p>
+    }
+    else
+    {
+        foreach (var review in Reviews.Items)
+        {
+            <article class="card card-body mb-2">
+                <div><span class="rating" aria-label="@review.Rating out of 5 stars">@(new string('★', review.Rating))@(new string('☆', 5 - review.Rating))</span>
+                    <strong class="ms-2">@review.ReviewerName</strong> <span class="badge text-bg-light">Verified purchase</span>
+                    <span class="text-muted small ms-2">@Format.Date(review.CreatedAt)</span></div>
+                @if (!string.IsNullOrWhiteSpace(review.Comment)) { <p class="mb-1">@review.Comment</p> }
+                @if (!string.IsNullOrWhiteSpace(review.SellerReply)) { <p class="mb-0 ps-3 border-start"><strong>Seller reply:</strong> @review.SellerReply</p> }
+                @if (User.Identity?.IsAuthenticated == true)
+                {
+                    <details class="mt-1"><summary class="small">Report this review</summary>
+                        <form method="post" asp-page="/Reviews/Report" asp-route-id="@review.Id" class="d-flex gap-2 mt-1">
+                            <input type="hidden" name="returnUrl" value="@Request.Path" />
+                            <label class="visually-hidden" for="reason-@review.Id">Reason</label>
+                            <input class="form-control" id="reason-@review.Id" name="reason" minlength="5" maxlength="300" required placeholder="Why are you reporting this?" />
+                            <button class="btn btn-outline-secondary" type="submit">Report</button>
+                        </form>
+                    </details>
+                }
+            </article>
+        }
+        <partial name="_Pager" model="(Reviews.Page, Reviews.TotalPages)" />
+    }
+</section>

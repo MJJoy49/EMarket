@@ -1,0 +1,42 @@
+@page "/Error/{code:int?}"
+@{
+    ViewData["Title"] = "Something went wrong";
+}
+@functions {
+    [FromRoute] public int? Code { get; set; }
+
+    public int StatusCodeValue => Code is >= 400 and <= 599 ? Code.Value : 500;
+
+    public (string Title, string Text) Info => StatusCodeValue switch
+    {
+        404 => ("Page not found", "The page you are looking for does not exist."),
+        403 => ("Not allowed", Messages.NotAllowed),
+        429 => ("Too many requests", Messages.TooManyRequests),
+        _ => ("Something went wrong", Messages.ServiceDown),
+    };
+
+    public void OnGet() => Response.StatusCode = StatusCodeValue;
+}
+
+<section class="text-center py-5">
+    <p class="display-3 fw-bold text-primary mb-0">@StatusCodeValue</p>
+    <h1 class="h3">@Info.Title</h1>
+    <p>@Info.Text</p>
+    @if (StatusCodeValue == 500)
+    {
+        @* FR-22.3: the correlation id helps support find the request; no stack trace is ever shown. *@
+        <p class="text-muted small">Reference: <code>@HttpContext.TraceIdentifier</code></p>
+    }
+    @if (StatusCodeValue == 404)
+    {
+        <form class="d-flex gap-2 justify-content-center mb-3" method="get" asp-page="/Products/Index" role="search">
+            <label class="visually-hidden" for="e-search">Search products</label>
+            <input class="form-control w-auto" id="e-search" name="q" minlength="2" placeholder="Search products" />
+            <button class="btn btn-primary" type="submit">Search</button>
+        </form>
+    }
+    <div class="d-flex gap-2 justify-content-center">
+        <a class="btn btn-primary" asp-page="/Index">Go to home</a>
+        <a class="btn btn-outline-primary" href="/" data-back>Go back</a>
+    </div>
+</section>

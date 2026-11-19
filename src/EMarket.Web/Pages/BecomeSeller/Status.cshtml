@@ -1,0 +1,33 @@
+@page "/seller/status"
+@using EMarket.Shared.Dtos.Sellers
+@{
+    ViewData["Title"] = "Seller application";
+}
+@functions {
+    public SellerApplicationDto? Application { get; private set; }
+
+    public async Task OnGetAsync()
+    {
+        var result = await Api.GetAsync<SellerApplicationDto>("api/v1/seller-applications/mine");
+        if (!Failed(result)) { Application = result.Data; }
+    }
+}
+
+<h1 class="h3">Seller application</h1>
+@if (Application is null)
+{
+    <div class="card card-body" style="max-width: 640px"><p>You have not applied yet. Selling is open to every verified buyer.</p><a class="btn btn-primary align-self-start" asp-page="/BecomeSeller/Apply">Become a seller</a></div>
+    return;
+}
+<div class="card card-body" style="max-width: 640px">
+    <p class="mb-2">Status <span class="badge @Format.Badge(Application.Status)">@Application.Status</span> &middot; Submitted @Format.Date(Application.SubmittedAt)</p>
+    <p class="mb-2">Shop <strong>@Application.ShopName</strong></p>
+    @if (Application.Status == "Pending") { <p class="text-muted mb-0">An admin is reviewing your documents. We will tell you when there is a decision.</p> }
+    @if (Application.Status == "Rejected")
+    {
+        <div class="alert alert-danger" role="status"><strong>Reason:</strong> @Application.RejectionReason</div>
+        <p>You can apply again 7 days after the rejection.</p>
+        <a class="btn btn-primary align-self-start" asp-page="/BecomeSeller/Apply">Edit and resubmit</a>
+    }
+    @if (Application.Status == "Approved") { <p>Your shop is open. Log in again if the seller menu is not visible yet.</p><a class="btn btn-primary align-self-start" asp-area="Seller" asp-page="/Index">Go to the seller dashboard</a> }
+</div>

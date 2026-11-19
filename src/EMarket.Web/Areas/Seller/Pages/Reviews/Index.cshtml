@@ -1,0 +1,61 @@
+@page "/seller/reviews"
+@using System.Text.Json
+@using EMarket.Shared.Dtos.AfterSale
+@using EMarket.Shared.Results
+@{
+    ViewData["Title"] = "Reviews";
+}
+@functions {
+    public PagedResult<ReviewDto>? Reviews { get; private set; }
+    public decimal Average { get; private set; }
+    public int Count { get; private set; }
+
+    public async Task OnGetAsync()
+    {
+        var url = $"api/v1/seller/reviews?stars={Request.Query["stars"]}&page={Math.Max(1, int.TryParse(Request.Query["page"], out var p) ? p : 1)}";
+        var result = await Api.GetAsync<JsonElement>(url);
+        if (Failed(result)) { return; }
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        Average = result.Data.GetProperty("average").GetDecimal();
+        Count = result.Data.GetProperty("count").GetInt32();
+        Reviews = result.Data.GetProperty("reviews").Deserialize<PagedResult<ReviewDto>>(options);
+    }
+
+    public async Task<IActionResult> OnPostReplyAsync(Guid id, string reply)
+    {
+        if (!Failed(await Api.PostAsync<Empty>($"api/v1/seller/reviews/{id}/reply", new { reply }))) { Success(Messages.Saved); }
+        return RedirectToPage();
+    }
+}
+
+<h1 class="h3">Reviews</h1>
+<div class="row g-3 mb-3">
+    <div class="col-6 col-md-3"><div class="stat-tile"><div class="text-muted small">Average rating</div><div class="value">@Average.ToString("0.0")</div></div></div>
+    <div class="col-6 col-md-3"><div class="stat-tile"><div class="text-muted small">Reviews</div><div class="value">@Count</div></div></div>
+</div>
+<form class="d-flex gap-2 mb-3" method="get">
+    <label class="visually-hidden" for="stars">Stars</label>
+    <select class="form-select w-auto" id="stars" name="stars" data-autosubmit>
+        <option value="">All stars</option>
+        @for (var s = 5; s >= 1; s--) { <option value="@s" selected="@(Request.Query["stars"] == s.ToString())">@s stars</option> }
+    </select>
+</form>
+@if (Reviews is null || Reviews.Items.Count == 0) { <p class="text-muted">No reviews yet.</p> return; }
+@foreach (var r in Reviews.Items)
+{
+    <article class="card card-body mb-2">
+        <div><span class="rating" aria-label="@r.Rating out of 5 stars">@(new string('★', r.Rating))@(new string('☆', 5 - r.Rating))</span> <strong class="ms-2">@r.ReviewerName</strong> <span class="text-muted small">@Format.Date(r.CreatedAt) &middot; @r.ProductName</span>
+            @if (r.Status == "Hidden") { <span class="badge text-bg-secondary">Hidden by admin</span> }</div>
+        @if (!string.IsNullOrWhiteSpace(r.Comment)) { <p class="mb-1">@r.Comment</p> }
+        @if (!string.IsNullOrWhiteSpace(r.SellerReply)) { <p class="mb-0 ps-3 border-start"><strong>Your reply:</strong> @r.SellerReply</p> }
+        else
+        {
+            <form class="d-flex gap-2" method="post" asp-page-handler="Reply" asp-route-id="@r.Id">
+                <label class="visually-hidden" for="re-@r.Id">Reply</label>
+                <input class="form-control" id="re-@r.Id" name="reply" maxlength="500" required placeholder="Write one public reply" />
+                <button class="btn btn-outline-primary" type="submit">Reply</button>
+            </form>
+        }
+    </article>
+}
+<partial name="_Pager" model="(Reviews.Page, Reviews.TotalPages)" />

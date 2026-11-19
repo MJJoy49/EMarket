@@ -1,0 +1,36 @@
+@page "/checkout/success"
+@using System.Text.Json
+@using EMarket.Shared.Dtos.Checkout
+@{
+    ViewData["Title"] = "Order placed";
+}
+@functions {
+    public CheckoutResultDto? Placed { get; private set; }
+
+    public IActionResult OnGet()
+    {
+        if (TempData["Placed"] is not string json) { return RedirectToPage("/Orders/Index"); }
+        Placed = JsonSerializer.Deserialize<CheckoutResultDto>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        return Page();
+    }
+}
+
+@if (Placed is null) { return; }
+<div class="row justify-content-center"><div class="col-lg-7">
+    <div class="card card-body text-center">
+        <h1 class="h3">Thank you! Your order is placed</h1>
+        <ul class="list-unstyled my-3">
+            @foreach (var order in Placed.Orders) { <li>Order <strong>@order.OrderNumber</strong> &middot; @order.ShopName &middot; @Format.Tk(order.Total)</li> }
+        </ul>
+        <p>Payable: <strong>@Format.Tk(Placed.Payable)</strong> (@(Placed.PaymentMethod == "COD" ? "cash on delivery" : Placed.PaymentMethod))</p>
+        @if (Placed.AwaitingPayment)
+        {
+            <div class="alert alert-warning" role="status">Awaiting payment confirmation. Please pay before @Format.DateTime(Placed.PayBefore!.Value).</div>
+            <form method="post" asp-page="/Orders/Index" asp-page-handler="Pay" asp-route-groupId="@Placed.CheckoutGroupId"><button class="btn btn-accent" type="submit">Pay now</button></form>
+        }
+        <div class="d-flex gap-2 justify-content-center mt-3">
+            <a class="btn btn-primary" asp-page="/Orders/Index">View orders</a>
+            <a class="btn btn-outline-primary" asp-page="/Products/Index">Continue shopping</a>
+        </div>
+    </div>
+</div></div>

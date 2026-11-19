@@ -1,10 +1,71 @@
-﻿@page
-@model IndexModel
+﻿@page "/"
 @{
-    ViewData["Title"] = "Home page";
+    ViewData["Title"] = "Home";
+}
+@functions {
+    public HomeDto? Home { get; private set; }
+
+    public async Task OnGetAsync()
+    {
+        var result = await Api.GetAsync<HomeDto>("api/v1/home");
+        Home = result.Data;
+        if (!result.Ok) { Problem(result.Message); }
+    }
 }
 
-<div class="text-center">
-    <h1 class="display-4">Welcome</h1>
-    <p>Learn about <a href="https://learn.microsoft.com/aspnet/core">building Web apps with ASP.NET Core</a>.</p>
-</div>
+<h1 class="visually-hidden">Welcome to EMarket</h1>
+
+@if (Home is null)
+{
+    <p class="text-muted">We could not load the home page. Please try again soon.</p>
+    return;
+}
+
+@if (Home.Banners.Count > 0)
+{
+    <div id="banners" class="carousel slide mb-4" data-bs-ride="carousel" aria-label="Offers">
+        <div class="carousel-inner">
+            @for (var i = 0; i < Home.Banners.Count; i++)
+            {
+                var banner = Home.Banners[i];
+                <div class="carousel-item banner-slide @(i == 0 ? "active" : "")">
+                    @if (!string.IsNullOrEmpty(banner.LinkUrl))
+                    {
+                        <a href="@banner.LinkUrl"><img src="@Format.Media(banner.ImageUrl)" alt="@banner.Title" /></a>
+                    }
+                    else
+                    {
+                        <img src="@Format.Media(banner.ImageUrl)" alt="@banner.Title" />
+                    }
+                </div>
+            }
+        </div>
+        @if (Home.Banners.Count > 1)
+        {
+            <button class="carousel-control-prev" type="button" data-bs-target="#banners" data-bs-slide="prev"><span class="carousel-control-prev-icon" aria-hidden="true"></span><span class="visually-hidden">Previous</span></button>
+            <button class="carousel-control-next" type="button" data-bs-target="#banners" data-bs-slide="next"><span class="carousel-control-next-icon" aria-hidden="true"></span><span class="visually-hidden">Next</span></button>
+        }
+    </div>
+}
+
+@foreach (var (title, items) in new[] { ("New arrivals", Home.NewArrivals), ("Top rated", Home.TopRated) })
+{
+    if (items.Count == 0) { continue; }
+    <section class="mb-4" aria-labelledby="h-@title.Replace(" ", "-")">
+        <div class="d-flex justify-content-between align-items-baseline mb-2">
+            <h2 class="h4" id="h-@title.Replace(" ", "-")">@title</h2>
+            <a asp-page="/Products/Index" asp-route-sort="@(title == "Top rated" ? "top-rated" : "newest")">View all</a>
+        </div>
+        <div class="row row-cols-2 row-cols-md-3 row-cols-lg-4 g-3">
+            @foreach (var product in items)
+            {
+                <div class="col"><partial name="_ProductCard" model="product" /></div>
+            }
+        </div>
+    </section>
+}
+
+@if (Home.NewArrivals.Count == 0 && Home.TopRated.Count == 0)
+{
+    <p class="lead">No products yet. Check back soon.</p>
+}

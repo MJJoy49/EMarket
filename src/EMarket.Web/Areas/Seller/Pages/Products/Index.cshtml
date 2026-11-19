@@ -1,0 +1,73 @@
+@page "/seller/products"
+@using EMarket.Shared.Results
+@{
+    ViewData["Title"] = "My products";
+    var tabs = new[] { ("", "All"), ("Draft", "Draft"), ("Pending", "Pending"), ("Active", "Active"), ("Rejected", "Rejected"), ("Hidden", "Hidden") };
+}
+@functions {
+    public PagedResult<SellerProductDto>? Products { get; private set; }
+    public string Current => Request.Query["status"].ToString();
+
+    public async Task OnGetAsync()
+    {
+        var result = await Api.GetAsync<PagedResult<SellerProductDto>>(
+            $"api/v1/seller/products?status={Uri.EscapeDataString(Current)}&search={Uri.EscapeDataString(Request.Query["search"].ToString())}&page={Math.Max(1, int.TryParse(Request.Query["page"], out var p) ? p : 1)}");
+        if (!Failed(result)) { Products = result.Data; }
+    }
+
+    public async Task<IActionResult> OnPostActionAsync(Guid id, string action)
+    {
+        var result = action switch
+        {
+            "hide" => await Api.PostAsync<Empty>($"api/v1/seller/products/{id}/hide"),
+            "unhide" => await Api.PostAsync<Empty>($"api/v1/seller/products/{id}/unhide"),
+            "delete" => await Api.DeleteAsync<Empty>($"api/v1/seller/products/{id}"),
+            "copy" => await Api.PostAsync<Empty>($"api/v1/seller/products/{id}/copy"),
+            _ => null,
+        };
+        if (result is not null && !Failed(result)) { Success(Messages.Saved); }
+        return RedirectToPage(new { status = Current });
+    }
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <h1 class="h3 mb-0">My products</h1>
+    <a class="btn btn-primary" asp-page="/Products/Edit">Add product</a>
+</div>
+<ul class="nav nav-pills mb-3 flex-wrap" aria-label="Product status">
+    @foreach (var (value, text) in tabs) { <li class="nav-item"><a class="nav-link @(Current == value ? "active" : "")" asp-page="/Products/Index" asp-route-status="@value">@text</a></li> }
+</ul>
+<form class="d-flex gap-2 mb-3" method="get" role="search">
+    <input type="hidden" name="status" value="@Current" />
+    <label class="visually-hidden" for="search">Search products</label>
+    <input class="form-control" id="search" name="search" value="@Request.Query["search"]" placeholder="Search products" />
+    <button class="btn btn-outline-primary" type="submit">Search</button>
+</form>
+
+@if (Products is null || Products.Items.Count == 0) { <p class="text-muted">No products here.</p> return; }
+<table class="table align-middle table-cards">
+    <thead><tr><th scope="col">Product</th><th scope="col">Category</th><th scope="col">Price</th><th scope="col">Stock</th><th scope="col">Sold</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+    <tbody>
+        @foreach (var p in Products.Items)
+        {
+            <tr>
+                <td data-label="Product"><div class="d-flex align-items-center gap-2">@if (p.ThumbUrl is not null) { <img src="@Format.Media(p.ThumbUrl)" alt="" width="40" height="40" class="rounded" loading="lazy" /> }<a asp-page="/Products/Edit" asp-route-id="@p.Id">@p.Name</a></div></td>
+                <td data-label="Category">@p.CategoryName</td>
+                <td data-label="Price">@Format.Tk(p.FinalPrice)</td>
+                <td data-label="Stock">@p.Stock</td>
+                <td data-label="Sold">@p.UnitsSold</td>
+                <td data-label="Status"><span class="badge @Format.Badge(p.Status)">@p.Status</span>@if (p.HiddenByAdmin) { <span class="badge text-bg-secondary">Hidden by admin</span> }@if (p.RejectionReason is not null) { <div class="small text-danger">@p.RejectionReason</div> }</td>
+                <td class="text-end">
+                    <form class="d-inline-flex flex-wrap gap-1 justify-content-end" method="post" asp-page-handler="Action" asp-route-id="@p.Id">
+                        <a class="btn btn-outline-primary btn-sm" asp-page="/Products/Edit" asp-route-id="@p.Id">Edit</a>
+                        @if (p.Status == "Active") { <button class="btn btn-outline-secondary btn-sm" name="action" value="hide" type="submit">Hide</button> }
+                        @if (p.Status == "Hidden") { <button class="btn btn-outline-secondary btn-sm" name="action" value="unhide" type="submit" disabled="@p.HiddenByAdmin">Unhide</button> }
+                        <button class="btn btn-outline-secondary btn-sm" name="action" value="copy" type="submit">Copy</button>
+                    </form>
+                    <form class="d-inline" method="post" asp-page-handler="Action" asp-route-id="@p.Id" data-confirm="Delete this product? Old orders keep their own copy."><button class="btn btn-outline-danger btn-sm" name="action" value="delete" type="submit">Delete</button></form>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+<partial name="_Pager" model="(Products.Page, Products.TotalPages)" />

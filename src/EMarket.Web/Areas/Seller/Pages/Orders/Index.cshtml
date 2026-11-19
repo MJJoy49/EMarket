@@ -1,0 +1,49 @@
+@page "/seller/orders"
+@using EMarket.Shared.Dtos.Orders
+@using EMarket.Shared.Results
+@{
+    ViewData["Title"] = "Orders";
+    var tabs = new[] { ("Pending", "New"), ("Confirmed", "Confirmed"), ("Processing", "Processing"), ("Shipped", "Shipped"), ("Delivered", "Delivered"), ("Cancelled", "Cancelled") };
+}
+@functions {
+    public PagedResult<OrderListItemDto>? Orders { get; private set; }
+    public string Current => Request.Query["status"].ToString();
+
+    public async Task OnGetAsync()
+    {
+        var url = $"api/v1/seller/orders?status={Uri.EscapeDataString(Current)}&from={Request.Query["from"]}&to={Request.Query["to"]}&page={Math.Max(1, int.TryParse(Request.Query["page"], out var p) ? p : 1)}";
+        var result = await Api.GetAsync<PagedResult<OrderListItemDto>>(url);
+        if (!Failed(result)) { Orders = result.Data; }
+    }
+}
+
+<h1 class="h3">Orders</h1>
+<ul class="nav nav-pills mb-3 flex-wrap" aria-label="Order status">
+    <li class="nav-item"><a class="nav-link @(Current == "" ? "active" : "")" asp-page="/Orders/Index">All</a></li>
+    @foreach (var (value, text) in tabs) { <li class="nav-item"><a class="nav-link @(Current == value ? "active" : "")" asp-page="/Orders/Index" asp-route-status="@value">@text</a></li> }
+</ul>
+<form class="row g-2 mb-3" method="get">
+    <input type="hidden" name="status" value="@Current" />
+    <div class="col-6 col-md-3"><label class="form-label" for="from">From date</label><input class="form-control" id="from" name="from" type="date" value="@Request.Query["from"]" /></div>
+    <div class="col-6 col-md-3"><label class="form-label" for="to">To date</label><input class="form-control" id="to" name="to" type="date" value="@Request.Query["to"]" /></div>
+    <div class="col-12 col-md-2 d-flex align-items-end"><button class="btn btn-outline-primary w-100" type="submit">Filter</button></div>
+</form>
+
+@if (Orders is null || Orders.Items.Count == 0) { <p class="text-muted">No orders here.</p> return; }
+<table class="table align-middle table-cards">
+    <thead><tr><th scope="col">Order</th><th scope="col">Date</th><th scope="col">Buyer</th><th scope="col">Total</th><th scope="col">Payment</th><th scope="col">Status</th></tr></thead>
+    <tbody>
+        @foreach (var o in Orders.Items)
+        {
+            <tr>
+                <td data-label="Order"><a asp-page="/Orders/Details" asp-route-id="@o.Id">@o.OrderNumber</a></td>
+                <td data-label="Date">@Format.Date(o.CreatedAt)</td>
+                <td data-label="Buyer">@o.BuyerName</td>
+                <td data-label="Total">@Format.Tk(o.Total)</td>
+                <td data-label="Payment">@(o.PaymentMethod == "COD" ? "COD" : o.PaymentMethod) <span class="badge @Format.Badge(o.PaymentStatus)">@Format.Status(o.PaymentStatus)</span></td>
+                <td data-label="Status"><span class="badge @Format.Badge(o.Status)">@Format.Status(o.Status)</span></td>
+            </tr>
+        }
+    </tbody>
+</table>
+<partial name="_Pager" model="(Orders.Page, Orders.TotalPages)" />

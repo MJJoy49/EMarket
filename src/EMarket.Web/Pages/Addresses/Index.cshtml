@@ -1,0 +1,114 @@
+@page "/addresses"
+@using EMarket.Shared.Dtos.Profile
+@{
+    ViewData["Title"] = "Address book";
+}
+@functions {
+    [BindProperty] public SaveAddressRequest Input { get; set; } = new();
+    [BindProperty(SupportsGet = true)] public Guid? Edit { get; set; }
+    [BindProperty(SupportsGet = true)] public string? ReturnUrl { get; set; }
+    public IReadOnlyList<AddressDto> Addresses { get; private set; } = [];
+    public IReadOnlyList<LocationDto> Divisions { get; private set; } = [];
+    public IReadOnlyList<LocationDto> Districts { get; private set; } = [];
+    public IReadOnlyList<LocationDto> Areas { get; private set; } = [];
+    public bool ShowForm { get; private set; }
+
+    public async Task OnGetAsync(bool add = false)
+    {
+        Addresses = (await Api.GetAsync<List<AddressDto>>("api/v1/addresses")).Data ?? [];
+        if (Edit is { } id && Addresses.FirstOrDefault(a => a.Id == id) is { } a)
+        {
+            Input = new SaveAddressRequest { FullName = a.FullName, Phone = a.Phone, DivisionId = a.DivisionId, DistrictId = a.DistrictId, AreaId = a.AreaId, AddressLine = a.AddressLine, IsDefault = a.IsDefault };
+        }
+
+        ShowForm = add || Edit is not null;
+        await LoadLocationsAsync();
+    }
+
+    // The district and area lists follow the chosen division and district without any script.
+    public async Task<IActionResult> OnPostRefreshAsync()
+    {
+        ModelState.Clear();
+        Addresses = (await Api.GetAsync<List<AddressDto>>("api/v1/addresses")).Data ?? [];
+        ShowForm = true;
+        await LoadLocationsAsync();
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostSaveAsync()
+    {
+        if (!ModelState.IsValid) { return await OnPostRefreshAsync(); }
+        var result = Edit is { } id
+            ? await Api.PutAsync<System.Text.Json.JsonElement>($"api/v1/addresses/{id}", Input)
+            : await Api.PostAsync<System.Text.Json.JsonElement>("api/v1/addresses", Input);
+        if (!result.Ok) { var page = await OnPostRefreshAsync(); AddErrors(result); return page; }
+        Success(Messages.Saved);
+        return IsLocal(ReturnUrl) ? LocalRedirect(ReturnUrl!) : RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostDefaultAsync(Guid id) { Failed(await Api.PostAsync<Empty>($"api/v1/addresses/{id}/default")); return RedirectToPage(); }
+
+    public async Task<IActionResult> OnPostDeleteAsync(Guid id) { Failed(await Api.DeleteAsync<Empty>($"api/v1/addresses/{id}")); return RedirectToPage(); }
+
+    private async Task LoadLocationsAsync()
+    {
+        Divisions = (await Api.GetAsync<List<LocationDto>>("api/v1/locations")).Data ?? [];
+        Districts = Input.DivisionId is { } d ? (await Api.GetAsync<List<LocationDto>>($"api/v1/locations?parentId={d}")).Data ?? [] : [];
+        Areas = Input.DistrictId is { } c ? (await Api.GetAsync<List<LocationDto>>($"api/v1/locations?parentId={c}")).Data ?? [] : [];
+    }
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">Address book</h1>
+    @if (!ShowForm) { <a class="btn btn-primary" asp-page="/Addresses/Index" asp-route-add="true" asp-route-returnUrl="@ReturnUrl">Add new address</a> }
+</div>
+
+@if (ShowForm)
+{
+    <form class="card card-body mb-4" method="post" asp-page-handler="Refresh" asp-route-edit="@Edit" asp-route-returnUrl="@ReturnUrl" novalidate>
+        <div asp-validation-summary="ModelOnly" class="text-danger mb-2" role="alert"></div>
+        <div class="row g-3">
+            <div class="col-md-6"><label class="form-label" asp-for="Input.FullName">Full name <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.FullName" required /><span class="text-danger" asp-validation-for="Input.FullName"></span></div>
+            <div class="col-md-6"><label class="form-label" asp-for="Input.Phone">Phone <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.Phone" type="tel" inputmode="numeric" required /><span class="text-danger" asp-validation-for="Input.Phone"></span></div>
+            <div class="col-md-4"><label class="form-label" asp-for="Input.DivisionId">Division <span aria-hidden="true">*</span></label>
+                <select class="form-select" asp-for="Input.DivisionId" data-autosubmit><option value="">Select</option>@foreach (var l in Divisions) { <option value="@l.Id" selected="@(Input.DivisionId == l.Id)">@l.Name</option> }</select><span class="text-danger" asp-validation-for="Input.DivisionId"></span></div>
+            <div class="col-md-4"><label class="form-label" asp-for="Input.DistrictId">District <span aria-hidden="true">*</span></label>
+                <select class="form-select" asp-for="Input.DistrictId" data-autosubmit><option value="">Select</option>@foreach (var l in Districts) { <option value="@l.Id" selected="@(Input.DistrictId == l.Id)">@l.Name</option> }</select><span class="text-danger" asp-validation-for="Input.DistrictId"></span></div>
+            <div class="col-md-4"><label class="form-label" asp-for="Input.AreaId">Area <span aria-hidden="true">*</span></label>
+                <select class="form-select" asp-for="Input.AreaId"><option value="">Select</option>@foreach (var l in Areas) { <option value="@l.Id" selected="@(Input.AreaId == l.Id)">@l.Name</option> }</select><span class="text-danger" asp-validation-for="Input.AreaId"></span></div>
+            <div class="col-12"><label class="form-label" asp-for="Input.AddressLine">Full address <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.AddressLine" minlength="10" maxlength="250" required /><span class="text-danger" asp-validation-for="Input.AddressLine"></span></div>
+            <div class="col-12"><div class="form-check"><input class="form-check-input" asp-for="Input.IsDefault" /><label class="form-check-label" asp-for="Input.IsDefault">Make this my default address</label></div></div>
+        </div>
+        <div class="d-flex gap-2 mt-3">
+            <button class="btn btn-primary" type="submit" asp-page-handler="Save" asp-route-edit="@Edit" asp-route-returnUrl="@ReturnUrl">Save address</button>
+            <a class="btn btn-outline-secondary" asp-page="/Addresses/Index">Cancel</a>
+        </div>
+    </form>
+}
+
+@if (Addresses.Count == 0 && !ShowForm)
+{
+    <p class="text-muted">You have no saved addresses yet.</p>
+}
+<div class="row g-3">
+    @foreach (var address in Addresses)
+    {
+        <div class="col-md-6">
+            <article class="card card-body h-100">
+                <h2 class="h6">@address.FullName @if (address.IsDefault) { <span class="badge text-bg-primary">Default</span> }</h2>
+                <p class="mb-1">@address.AddressLine, @address.Area, @address.District, @address.Division</p>
+                <p class="text-muted mb-2">@address.Phone</p>
+                <div class="d-flex flex-wrap gap-2 mt-auto">
+                    <a class="btn btn-outline-primary btn-sm" asp-page="/Addresses/Index" asp-route-edit="@address.Id" asp-route-returnUrl="@ReturnUrl">Edit</a>
+                    @if (!address.IsDefault)
+                    {
+                        <form method="post" asp-page-handler="Default" asp-route-id="@address.Id"><button class="btn btn-outline-secondary btn-sm" type="submit">Set default</button></form>
+                    }
+                    <form method="post" asp-page-handler="Delete" asp-route-id="@address.Id" data-confirm="Delete this address? Your past orders keep their own copy."><button class="btn btn-outline-danger btn-sm" type="submit">Delete</button></form>
+                </div>
+            </article>
+        </div>
+    }
+</div>
+
+@section Scripts { <partial name="_ValidationScriptsPartial" /> }

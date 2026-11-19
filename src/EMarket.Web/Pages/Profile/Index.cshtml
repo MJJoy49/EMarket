@@ -1,0 +1,105 @@
+@page "/profile"
+@using System.Text.Json
+@using EMarket.Shared.Dtos.Profile
+@{
+    ViewData["Title"] = "My profile";
+}
+@functions {
+    [BindProperty] public UpdateProfileRequest Input { get; set; } = new();
+    public ProfileDto? Profile { get; private set; }
+    public IReadOnlyList<CreditLineDto> Credit { get; private set; } = [];
+
+    public async Task OnGetAsync()
+    {
+        await LoadAsync();
+        if (Profile is not null)
+        {
+            Input = new UpdateProfileRequest { FullName = Profile.FullName, Email = Profile.Email, Phone = Profile.Phone, Gender = Profile.Gender, BirthDate = Profile.BirthDate };
+        }
+    }
+
+    public async Task<IActionResult> OnPostAsync()
+    {
+        if (!ModelState.IsValid) { await LoadAsync(); return Page(); }
+        var result = await Api.PutAsync<JsonElement>("api/v1/profile", Input);
+        if (!result.Ok) { await LoadAsync(); AddErrors(result); return Page(); }
+        Success(result.Data.TryGetProperty("emailChangeStarted", out var started) && started.GetBoolean()
+            ? "Saved. We sent a link to your new email; it becomes your login after you open it." : Messages.Saved);
+        return RedirectToPage();
+    }
+
+    // FR-2.3: Cancel drops unsaved changes and shows the last saved values.
+    public IActionResult OnPostCancel() => RedirectToPage();
+
+    public async Task<IActionResult> OnPostPhotoAsync(IFormFile? photo)
+    {
+        if (photo is null) { Problem(Messages.BadFile); return RedirectToPage(); }
+        using var memory = new MemoryStream();
+        await photo.CopyToAsync(memory);
+        var result = await Api.PostFormAsync<JsonElement>("api/v1/profile/photo", new Dictionary<string, string?>(), [new FormFilePart("file", photo.FileName, memory.ToArray())]);
+        if (!Failed(result)) { Success(Messages.Saved); }
+        return RedirectToPage();
+    }
+
+    private async Task LoadAsync()
+    {
+        var profile = await Api.GetAsync<ProfileDto>("api/v1/profile");
+        Failed(profile);
+        Profile = profile.Data;
+        if (!IsAdmin) { Credit = (await Api.GetAsync<List<CreditLineDto>>("api/v1/profile/credit-history")).Data ?? []; }
+    }
+}
+
+<h1 class="h3">My profile</h1>
+<div class="row g-4">
+    <div class="col-lg-6">
+        <form class="card card-body" method="post" novalidate>
+            <div asp-validation-summary="ModelOnly" class="text-danger mb-2" role="alert"></div>
+            <div class="mb-3"><label class="form-label" asp-for="Input.FullName">Full name <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.FullName" required /><span class="text-danger" asp-validation-for="Input.FullName"></span></div>
+            <div class="mb-3"><label class="form-label" asp-for="Input.Email">Email <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.Email" type="email" required />
+                @if (Profile is { EmailConfirmed: false }) { <div class="form-text text-danger">Not verified yet.</div> }
+                <span class="text-danger" asp-validation-for="Input.Email"></span></div>
+            <div class="mb-3"><label class="form-label" asp-for="Input.Phone">Mobile <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.Phone" type="tel" inputmode="numeric" required /><span class="text-danger" asp-validation-for="Input.Phone"></span></div>
+            <div class="row g-2 mb-3">
+                <div class="col-6"><label class="form-label" asp-for="Input.Gender">Gender</label>
+                    <select class="form-select" asp-for="Input.Gender"><option value="">Not set</option><option>Male</option><option>Female</option></select></div>
+                <div class="col-6"><label class="form-label" asp-for="Input.BirthDate">Birth date</label><input class="form-control" asp-for="Input.BirthDate" type="date" /></div>
+            </div>
+            <div class="d-flex gap-2">
+                <button class="btn btn-primary" type="submit">Save changes</button>
+                <button class="btn btn-outline-secondary" type="submit" asp-page-handler="Cancel" formnovalidate>Cancel</button>
+            </div>
+        </form>
+        <form class="card card-body mt-3" method="post" asp-page-handler="Photo" enctype="multipart/form-data">
+            <label class="form-label" for="photo">Photo (JPG or PNG, up to 2 MB)</label>
+            <input class="form-control mb-2" id="photo" name="photo" type="file" accept="image/jpeg,image/png" />
+            <button class="btn btn-outline-primary align-self-start" type="submit">Upload photo</button>
+        </form>
+        <p class="mt-3 small"><a asp-page="/Account/ChangePassword">Change password</a>@if (!IsAdmin) { <text> &middot; <a asp-page="/Addresses/Index">Address book</a></text> }</p>
+    </div>
+
+    @if (!IsAdmin)
+    {
+        <div class="col-lg-6">
+            <section class="card card-body" aria-labelledby="credit">
+                <h2 class="h5" id="credit">Store credit</h2>
+                <p class="h4">@Format.Tk(Profile?.StoreCredit ?? 0)</p>
+                @if (Credit.Count == 0) { <p class="text-muted mb-0">No credit movements yet.</p> }
+                else
+                {
+                    <table class="table table-sm table-cards mb-0">
+                        <thead><tr><th scope="col">Date</th><th scope="col">Type</th><th scope="col" class="text-end">Amount</th></tr></thead>
+                        <tbody>
+                            @foreach (var line in Credit)
+                            {
+                                <tr><td data-label="Date">@Format.Date(line.At)</td><td data-label="Type">@Format.Status(line.Kind)@(line.OrderNumber is null ? "" : $" ({line.OrderNumber})")</td><td data-label="Amount" class="text-end">@Format.Tk(line.Amount)</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </section>
+        </div>
+    }
+</div>
+
+@section Scripts { <partial name="_ValidationScriptsPartial" /> }

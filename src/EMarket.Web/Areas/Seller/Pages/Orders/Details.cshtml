@@ -1,0 +1,103 @@
+@page "/seller/orders/{id:guid}"
+@using EMarket.Shared.Dtos.Orders
+@{
+    ViewData["Title"] = Order is null ? "Order" : $"Order {Order.OrderNumber}";
+}
+@functions {
+    [FromRoute] public Guid Id { get; set; }
+    [BindProperty] public ShipRequest Ship { get; set; } = new();
+    public OrderDetailDto? Order { get; private set; }
+
+    public async Task<IActionResult> OnGetAsync()
+    {
+        var result = await Api.GetAsync<OrderDetailDto>($"api/v1/seller/orders/{Id}");
+        if (result.Status == 404) { return NotFound(); }
+        if (Failed(result)) { return RedirectToPage("/Orders/Index"); }
+        Order = result.Data;
+        Ship = new ShipRequest { CourierName = Order!.CourierName, TrackingNote = Order.TrackingNote };
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostMoveAsync(string step, string? reason)
+    {
+        ApiResult<Empty> result = step switch
+        {
+            "confirm" => await Api.PostAsync<Empty>($"api/v1/seller/orders/{Id}/confirm"),
+            "process" => await Api.PostAsync<Empty>($"api/v1/seller/orders/{Id}/process"),
+            "deliver" => await Api.PostAsync<Empty>($"api/v1/seller/orders/{Id}/deliver"),
+            "cancel" => await Api.PostAsync<Empty>($"api/v1/seller/orders/{Id}/cancel", new { reason }),
+            _ => new ApiResult<Empty> { Ok = false, Message = Messages.Invalid },
+        };
+        if (!Failed(result)) { Success(Messages.Saved); }
+        return RedirectToPage(new { id = Id });
+    }
+
+    public async Task<IActionResult> OnPostShipAsync()
+    {
+        if (!Failed(await Api.PostAsync<Empty>($"api/v1/seller/orders/{Id}/ship", Ship))) { Success(Messages.Saved); }
+        return RedirectToPage(new { id = Id });
+    }
+
+    public async Task<IActionResult> OnPostTrackingAsync()
+    {
+        if (!Failed(await Api.PutAsync<Empty>($"api/v1/seller/orders/{Id}/tracking", Ship))) { Success(Messages.Saved); }
+        return RedirectToPage(new { id = Id });
+    }
+}
+
+@if (Order is null) { return; }
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <h1 class="h3 mb-0">Order @Order.OrderNumber <span class="badge @Format.Badge(Order.Status)">@Format.Status(Order.Status)</span></h1>
+    <a class="btn btn-outline-secondary" asp-page="/Orders/Slip" asp-route-id="@Order.Id" target="_blank" rel="noopener">Print packing slip</a>
+</div>
+<div class="row g-4">
+    <div class="col-lg-8">
+        <section class="card card-body mb-3" aria-labelledby="progress">
+            <h2 class="h5" id="progress">Progress</h2>
+            <ol class="timeline mb-0">@foreach (var c in Order.History) { <li><strong>@Format.Status(c.To)</strong> <span class="text-muted small">@Format.DateTime(c.At)</span>@if (!string.IsNullOrEmpty(c.Note)) { <div class="small">@c.Note</div> }</li> }</ol>
+        </section>
+        <section class="card card-body" aria-labelledby="items">
+            <h2 class="h5" id="items">Items</h2>
+            <table class="table table-sm table-cards mb-0">
+                <thead><tr><th scope="col">Item</th><th scope="col">Qty</th><th scope="col">Price</th></tr></thead>
+                <tbody>@foreach (var i in Order.Items) { <tr><td data-label="Item">@i.ProductName@(string.IsNullOrEmpty(i.VariantText) ? "" : $" ({i.VariantText})")</td><td data-label="Qty">@i.Quantity</td><td data-label="Price">@Format.Tk(i.UnitPrice * i.Quantity)</td></tr> }</tbody>
+            </table>
+            <p class="text-end mb-0 mt-2">Items @Format.Tk(Order.ItemsTotal) &middot; Delivery @Format.Tk(Order.DeliveryFee) &middot; <strong>Total @Format.Tk(Order.Total)</strong></p>
+        </section>
+    </div>
+    <aside class="col-lg-4">
+        <section class="card card-body mb-3"><h2 class="h5">Buyer</h2><p class="mb-0">@Order.BuyerName<br />@Order.ShipPhone<br />@Order.ShipAddress</p><p class="small text-muted mb-0 mt-2">Payment: @(Order.PaymentMethod == "COD" ? "Cash on delivery" : Order.PaymentMethod)</p></section>
+        <section class="card card-body" aria-labelledby="act">
+            <h2 class="h5" id="act">Actions</h2>
+            <div class="d-grid gap-2">
+                @if (Order.AllowedActions.Contains("Confirmed")) { <form method="post" asp-page-handler="Move"><button class="btn btn-primary w-100" name="step" value="confirm" type="submit">Confirm order</button></form> }
+                @if (Order.AllowedActions.Contains("Processing")) { <form method="post" asp-page-handler="Move"><button class="btn btn-primary w-100" name="step" value="process" type="submit">Start processing</button></form> }
+                @if (Order.AllowedActions.Contains("Shipped"))
+                {
+                    <form method="post" asp-page-handler="Ship" class="card card-body">
+                        <div class="mb-2"><label class="form-label" asp-for="Ship.CourierName">Courier</label><input class="form-control" asp-for="Ship.CourierName" maxlength="60" /></div>
+                        <div class="mb-2"><label class="form-label" asp-for="Ship.TrackingNote">Tracking note</label><input class="form-control" asp-for="Ship.TrackingNote" maxlength="200" /></div>
+                        <button class="btn btn-primary" type="submit">Mark as shipped</button>
+                    </form>
+                }
+                @if (Order.AllowedActions.Contains("Delivered")) { <form method="post" asp-page-handler="Move" data-confirm="Mark this order as delivered? For cash on delivery this records the cash as collected."><button class="btn btn-primary w-100" name="step" value="deliver" type="submit">Mark as delivered</button></form> }
+                @if (Order.AllowedActions.Contains("Cancelled"))
+                {
+                    <form method="post" asp-page-handler="Move" class="card card-body" data-confirm="Cancel this order? Stock returns and a paid order is refunded.">
+                        <label class="form-label" for="reason">Cancel with a reason <span aria-hidden="true">*</span></label>
+                        <input class="form-control mb-2" id="reason" name="reason" minlength="5" maxlength="200" required placeholder="For example: out of stock" />
+                        <button class="btn btn-outline-danger" name="step" value="cancel" type="submit">Cancel order</button>
+                    </form>
+                }
+                @if (Order.Status is "Confirmed" or "Processing" or "Shipped")
+                {
+                    <form method="post" asp-page-handler="Tracking" class="card card-body">
+                        <div class="mb-2"><label class="form-label" for="note">Tracking note</label><input class="form-control" id="note" name="Ship.TrackingNote" value="@Order.TrackingNote" maxlength="200" /></div>
+                        <input type="hidden" name="Ship.CourierName" value="@Order.CourierName" />
+                        <button class="btn btn-outline-primary" type="submit">Save note</button>
+                    </form>
+                }
+            </div>
+        </section>
+    </aside>
+</div>

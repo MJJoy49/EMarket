@@ -1,0 +1,65 @@
+@page "/seller/apply"
+@using System.Text.Json
+@using EMarket.Shared.Dtos.Sellers
+@{
+    ViewData["Title"] = "Become a seller";
+}
+@functions {
+    [BindProperty] public SellerApplicationRequest Input { get; set; } = new();
+
+    public IActionResult OnGet() => IsSeller ? RedirectToPage("/Index", new { area = "Seller" }) : Page();
+
+    public async Task<IActionResult> OnPostAsync(IFormFile? nidFront, IFormFile? nidBack, IFormFile? tradeLicence)
+    {
+        if (nidFront is null) { ModelState.AddModelError("nidFront", Messages.Required); }
+        if (nidBack is null) { ModelState.AddModelError("nidBack", Messages.Required); }
+        if (!ModelState.IsValid) { return Page(); }
+
+        var files = new List<FormFilePart>();
+        foreach (var (field, file) in new[] { ("nidFront", nidFront), ("nidBack", nidBack), ("tradeLicence", tradeLicence) })
+        {
+            if (file is null || file.Length == 0) { continue; }
+            using var memory = new MemoryStream();
+            await file.CopyToAsync(memory);
+            files.Add(new FormFilePart(field, file.FileName, memory.ToArray()));
+        }
+
+        var fields = new Dictionary<string, string?>
+        {
+            ["ShopName"] = Input.ShopName, ["ShopDescription"] = Input.ShopDescription, ["BusinessType"] = Input.BusinessType, ["NidNumber"] = Input.NidNumber,
+            ["PayoutMethod"] = Input.PayoutMethod, ["WalletNumber"] = Input.WalletNumber, ["BankName"] = Input.BankName, ["BankBranch"] = Input.BankBranch,
+            ["RoutingNumber"] = Input.RoutingNumber, ["AccountName"] = Input.AccountName, ["AccountNumber"] = Input.AccountNumber,
+            ["AcceptSellerTerms"] = Input.AcceptSellerTerms ? "true" : "false",
+        };
+        var result = await Api.PostFormAsync<JsonElement>("api/v1/seller-applications", fields, files);
+        if (!result.Ok) { AddErrors(result); return Page(); } // keeps the typed values; the photos have to be chosen again
+        Success(Messages.ApplicationSent);
+        return RedirectToPage("/BecomeSeller/Status");
+    }
+}
+
+<h1 class="h3">Become a seller</h1>
+<form class="card card-body" method="post" enctype="multipart/form-data" style="max-width: 760px" novalidate>
+    <div asp-validation-summary="All" class="text-danger mb-2" role="alert"></div>
+    <div class="row g-3">
+        <div class="col-md-6"><label class="form-label" asp-for="Input.ShopName">Shop name <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.ShopName" minlength="3" maxlength="60" required /></div>
+        <div class="col-md-6"><label class="form-label" asp-for="Input.BusinessType">Business type <span aria-hidden="true">*</span></label><select class="form-select" asp-for="Input.BusinessType"><option>Individual</option><option>Business</option></select></div>
+        <div class="col-12"><label class="form-label" asp-for="Input.ShopDescription">Shop description (up to 500 characters)</label><textarea class="form-control" asp-for="Input.ShopDescription" rows="3" maxlength="500"></textarea></div>
+        <div class="col-md-6"><label class="form-label" asp-for="Input.NidNumber">NID number <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.NidNumber" inputmode="numeric" pattern="(\d{10}|\d{13}|\d{17})" required /><div class="form-text">10, 13 or 17 digits.</div></div>
+        <div class="col-md-6"></div>
+        <div class="col-md-6"><label class="form-label" for="nidFront">NID photo, front <span aria-hidden="true">*</span></label><input class="form-control" id="nidFront" name="nidFront" type="file" accept="image/jpeg,image/png" required /></div>
+        <div class="col-md-6"><label class="form-label" for="nidBack">NID photo, back <span aria-hidden="true">*</span></label><input class="form-control" id="nidBack" name="nidBack" type="file" accept="image/jpeg,image/png" required /></div>
+        <div class="col-md-6"><label class="form-label" for="tradeLicence">Trade licence photo (optional)</label><input class="form-control" id="tradeLicence" name="tradeLicence" type="file" accept="image/jpeg,image/png" /></div>
+        <div class="col-md-6"><label class="form-label" asp-for="Input.PayoutMethod">Payout method <span aria-hidden="true">*</span></label>
+            <select class="form-select" asp-for="Input.PayoutMethod"><option value="">Select</option><option value="bKash">bKash</option><option value="Nagad">Nagad</option><option value="BankTransfer">Bank transfer</option></select></div>
+        <div class="col-12"><p class="mb-1 text-muted">For bKash or Nagad, give the mobile number. For a bank, give all the bank details.</p></div>
+        <div class="col-md-6"><label class="form-label" asp-for="Input.WalletNumber">Mobile number (bKash or Nagad)</label><input class="form-control" asp-for="Input.WalletNumber" type="tel" inputmode="numeric" placeholder="01XXXXXXXXX" /></div>
+        <div class="col-md-6"><label class="form-label" asp-for="Input.BankName">Bank name</label><input class="form-control" asp-for="Input.BankName" maxlength="80" /></div>
+        <div class="col-md-6"><label class="form-label" asp-for="Input.BankBranch">Branch</label><input class="form-control" asp-for="Input.BankBranch" maxlength="80" /></div>
+        <div class="col-md-6"><label class="form-label" asp-for="Input.RoutingNumber">Routing number (9 digits)</label><input class="form-control" asp-for="Input.RoutingNumber" inputmode="numeric" /></div>
+        <div class="col-md-6"><label class="form-label" asp-for="Input.AccountName">Account name</label><input class="form-control" asp-for="Input.AccountName" maxlength="100" /></div>
+        <div class="col-md-6"><label class="form-label" asp-for="Input.AccountNumber">Account number (6 to 20 digits)</label><input class="form-control" asp-for="Input.AccountNumber" inputmode="numeric" /></div>
+        <div class="col-12"><div class="form-check"><input class="form-check-input" asp-for="Input.AcceptSellerTerms" required /><label class="form-check-label" asp-for="Input.AcceptSellerTerms">I accept the <a asp-page="/Pages/Show" asp-route-slug="seller-terms">Seller Terms</a> <span aria-hidden="true">*</span></label></div></div>
+    </div>
+    <button class="btn btn-primary mt-3 align-self-start" type="submit">Submit application</button>
+</form>

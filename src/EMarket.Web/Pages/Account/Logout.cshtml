@@ -1,0 +1,20 @@
+@page "/logout"
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@using EMarket.Shared.Dtos.Auth
+@functions {
+    // Logout is a POST with the anti-forgery token, so another site cannot log a user out (NFR-31).
+    public IActionResult OnGet() => RedirectToPage("/Index");
+
+    public async Task<IActionResult> OnPostAsync()
+    {
+        var refresh = await HttpContext.GetTokenAsync(CookieAuthenticationDefaults.AuthenticationScheme, "refresh_token");
+        if (refresh is not null)
+        {
+            await Api.PostAsync<Empty>("api/v1/auth/logout", new RefreshRequest { RefreshToken = refresh }); // FR-1.12: the refresh token stops working
+        }
+
+        await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        return RedirectToPage("/Index");
+    }
+}

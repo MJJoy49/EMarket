@@ -1,0 +1,135 @@
+@page "/orders/{id:guid}"
+@using System.Text.Json
+@using EMarket.Shared.Dtos.Orders
+@{
+    ViewData["Title"] = Order is null ? "Order" : $"Order {Order.OrderNumber}";
+}
+@functions {
+    [FromRoute] public Guid Id { get; set; }
+    [BindProperty] public CancelRequest Cancel { get; set; } = new();
+    public OrderDetailDto? Order { get; private set; }
+
+    public async Task<IActionResult> OnGetAsync()
+    {
+        var result = await Api.GetAsync<OrderDetailDto>($"api/v1/orders/{Id}");
+        if (result.Status == 404) { return NotFound(); }
+        if (Failed(result)) { return RedirectToPage("/Orders/Index"); }
+        Order = result.Data;
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostCancelAsync()
+    {
+        if (!ModelState.IsValid) { Problem("Please give a reason of 5 to 200 characters."); return RedirectToPage(new { id = Id }); }
+        var result = await Api.PostAsync<JsonElement>($"api/v1/orders/{Id}/cancel", Cancel);
+        if (result.Ok) { Success(Messages.OrderCancelled); } else { Problem(result.Message); }
+        return RedirectToPage(new { id = Id });
+    }
+
+    public async Task<IActionResult> OnPostPayAsync(Guid groupId)
+    {
+        var result = await Api.PostAsync<PaymentStartDto>($"api/v1/orders/groups/{groupId}/pay");
+        if (result.Ok && result.Data is not null) { return Redirect(result.Data.GatewayUrl); }
+        Problem(result.Message);
+        return RedirectToPage(new { id = Id });
+    }
+
+    public async Task<IActionResult> OnPostReorderAsync()
+    {
+        var result = await Api.PostAsync<JsonElement>($"api/v1/orders/{Id}/reorder");
+        if (Failed(result)) { return RedirectToPage(new { id = Id }); }
+        var skipped = result.Data.GetProperty("skipped").EnumerateArray().Select(x => x.GetString()).ToList();
+        Success(skipped.Count == 0 ? "The items were added to your cart." : $"Added to your cart. Not available now: {string.Join(", ", skipped)}.");
+        return RedirectToPage("/Cart/Index");
+    }
+
+    public async Task<IActionResult> OnGetInvoiceAsync()
+    {
+        var file = await Api.DownloadAsync($"api/v1/orders/{Id}/invoice");
+        if (!file.Ok) { Problem(file.Message); return RedirectToPage(new { id = Id }); }
+        return File(file.Data!.Content, "application/pdf", file.Data.FileName ?? "invoice.pdf");
+    }
+}
+
+@if (Order is null) { return; }
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <h1 class="h3 mb-0">Order @Order.OrderNumber <span class="badge @Format.Badge(Order.Status)">@Format.Status(Order.Status)</span></h1>
+    <span class="text-muted">@Format.DateTime(Order.CreatedAt) &middot; @Order.ShopName</span>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-8">
+        <section class="card card-body mb-3" aria-labelledby="timeline">
+            <h2 class="h5" id="timeline">Progress</h2>
+            <ol class="timeline mb-0">
+                @foreach (var change in Order.History)
+                {
+                    <li><strong>@Format.Status(change.To)</strong> <span class="text-muted small">@Format.DateTime(change.At)</span>@if (!string.IsNullOrEmpty(change.Note)) { <div class="small">@change.Note</div> }</li>
+                }
+            </ol>
+            @if (!string.IsNullOrEmpty(Order.TrackingNote) || !string.IsNullOrEmpty(Order.CourierName)) { <p class="mb-0 mt-2"><strong>Tracking:</strong> @Order.CourierName @Order.TrackingNote</p> }
+        </section>
+
+        <section class="card card-body mb-3" aria-labelledby="items">
+            <h2 class="h5" id="items">Items</h2>
+            <table class="table table-sm align-middle table-cards mb-0">
+                <thead><tr><th scope="col">Item</th><th scope="col">Qty</th><th scope="col">Price</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+                <tbody>
+                    @foreach (var item in Order.Items)
+                    {
+                        <tr>
+                            <td data-label="Item"><a asp-page="/Products/Details" asp-route-id="@item.ProductId">@item.ProductName</a>@if (!string.IsNullOrEmpty(item.VariantText)) { <span class="text-muted"> (@item.VariantText)</span> }</td>
+                            <td data-label="Qty">@item.Quantity@(item.ReturnedQuantity > 0 ? $" ({item.ReturnedQuantity} returned)" : "")</td>
+                            <td data-label="Price">@Format.Tk(item.UnitPrice * item.Quantity)</td>
+                            <td class="text-end">
+                                @if (Order.Status == "Delivered" && !item.Reviewed) { <a class="btn btn-outline-primary btn-sm" asp-page="/Reviews/Create" asp-route-orderItemId="@item.Id">Write a review</a> }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+    </div>
+
+    <aside class="col-lg-4">
+        <section class="card card-body mb-3" aria-labelledby="summary">
+            <h2 class="h5" id="summary">Payment</h2>
+            <dl class="row mb-2">
+                <dt class="col-6 fw-normal">Items</dt><dd class="col-6 text-end">@Format.Tk(Order.ItemsTotal)</dd>
+                <dt class="col-6 fw-normal">Delivery</dt><dd class="col-6 text-end">@Format.Tk(Order.DeliveryFee)</dd>
+                @if (Order.Discount > 0) { <dt class="col-6 fw-normal">Coupon</dt><dd class="col-6 text-end">-@Format.Tk(Order.Discount)</dd> }
+                @if (Order.CreditUsed > 0) { <dt class="col-6 fw-normal">Store credit</dt><dd class="col-6 text-end">-@Format.Tk(Order.CreditUsed)</dd> }
+                <dt class="col-6">Total</dt><dd class="col-6 text-end fw-bold">@Format.Tk(Order.Total)</dd>
+            </dl>
+            <p class="mb-1">@(Order.PaymentMethod == "COD" ? "Cash on delivery" : Order.PaymentMethod) &middot; <span class="badge @Format.Badge(Order.PaymentStatus)">@Format.Status(Order.PaymentStatus)</span></p>
+            @foreach (var refund in Order.Refunds) { <p class="small mb-0">Refund @Format.Tk(refund.Amount) <span class="badge @Format.Badge(refund.Status)">@refund.Status</span></p> }
+            @if (Order.Refunds.Count == 0) { <p class="small text-muted mb-0">Refund: none</p> }
+        </section>
+        <section class="card card-body mb-3" aria-labelledby="ship">
+            <h2 class="h5" id="ship">Delivery address</h2>
+            <p class="mb-0">@Order.ShipName<br />@Order.ShipAddress<br />@Order.ShipPhone</p>
+        </section>
+
+        <div class="d-grid gap-2">
+            @if (Order.AllowedActions.Contains("Pay") && Order.PayBefore is { } payBefore)
+            {
+                <form method="post" asp-page-handler="Pay" asp-route-groupId="@Order.CheckoutGroupId"><button class="btn btn-accent w-100" type="submit">Pay now</button></form>
+                <p class="small text-muted mb-0">Pay before @Format.DateTime(payBefore).</p>
+            }
+            @if (Order.AllowedActions.Contains("Invoice")) { <a class="btn btn-outline-primary" asp-page-handler="Invoice" asp-route-id="@Order.Id">Download invoice</a> }
+            <form method="post" asp-page-handler="Reorder"><button class="btn btn-outline-secondary w-100" type="submit">Reorder</button></form>
+            @if (Order.Status == "Delivered") { <a class="btn btn-outline-primary" asp-page="/Returns/Create" asp-route-orderId="@Order.Id">Return items</a> }
+            @if (Order.Status == "Shipped" || Order.Status == "Delivered") { <a class="btn btn-outline-secondary" asp-page="/Returns/Create" asp-route-orderId="@Order.Id" asp-route-notReceived="true">Report not received</a> }
+            @if (Order.AllowedActions.Contains("Cancelled"))
+            {
+                <button class="btn btn-outline-danger" type="button" data-bs-toggle="collapse" data-bs-target="#cancel-box" aria-expanded="false" aria-controls="cancel-box">Cancel order</button>
+                <form id="cancel-box" class="collapse card card-body" method="post" asp-page-handler="Cancel" data-confirm="Cancel this order?">
+                    <label class="form-label" asp-for="Cancel.Reason">Reason <span aria-hidden="true">*</span></label>
+                    <input class="form-control mb-2" asp-for="Cancel.Reason" minlength="5" maxlength="200" required />
+                    <button class="btn btn-danger" type="submit">Confirm cancel</button>
+                </form>
+            }
+        </div>
+    </aside>
+</div>

@@ -1,0 +1,144 @@
+@page "/checkout"
+@using System.Text.Json
+@using EMarket.Shared.Dtos.Checkout
+@using EMarket.Shared.Dtos.Orders
+@using EMarket.Shared.Dtos.Profile
+@{
+    ViewData["Title"] = "Checkout";
+}
+@functions {
+    [BindProperty] public CheckoutRequest Input { get; set; } = new();
+
+    /// <summary>One key for this form. A double click or a retry sends the same key, so only one order is made (NFR-2, FR-8.11).</summary>
+    [BindProperty] public string IdempotencyKey { get; set; } = "";
+
+    public IReadOnlyList<AddressDto> Addresses { get; private set; } = [];
+    public CheckoutSummaryDto? Summary { get; private set; }
+
+    public async Task OnGetAsync()
+    {
+        IdempotencyKey = Guid.NewGuid().ToString("N");
+        await LoadAsync(useDefaultAddress: true);
+    }
+
+    // Changing the address, method, coupon or the credit switch refreshes the totals.
+    public async Task<IActionResult> OnPostSummaryAsync()
+    {
+        ModelState.Clear();
+        await LoadAsync(useDefaultAddress: false);
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostPlaceAsync()
+    {
+        if (string.IsNullOrWhiteSpace(IdempotencyKey)) { IdempotencyKey = Guid.NewGuid().ToString("N"); }
+        if (Input.AddressId is null) { Problem(Messages.Required); await LoadAsync(false); return Page(); }
+        var result = await Api.PostAsync<JsonElement>("api/v1/checkout", Input, IdempotencyKey);
+        if (!result.Ok) { Problem(result.Message); await LoadAsync(false); return Page(); }
+
+        // A repeated key answers 200 with the first result inside "result" (MSG36); a new order answers 201 with the result itself.
+        var repeated = result.Data.TryGetProperty("result", out var inner);
+        var placed = (repeated ? inner : result.Data).Deserialize<CheckoutResultDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        if (repeated) { Success(Messages.AlreadyDone); }
+
+        if (placed.AwaitingPayment)
+        {
+            var pay = await Api.PostAsync<PaymentStartDto>($"api/v1/orders/groups/{placed.CheckoutGroupId}/pay");
+            if (pay.Ok && pay.Data is not null) { return Redirect(pay.Data.GatewayUrl); } // the buyer pays on the gateway page; EMarket never sees card data
+            Problem(pay.Message);
+        }
+
+        TempData["Placed"] = JsonSerializer.Serialize(placed);
+        return RedirectToPage("/Checkout/Success");
+    }
+
+    private async Task LoadAsync(bool useDefaultAddress)
+    {
+        Addresses = (await Api.GetAsync<List<AddressDto>>("api/v1/addresses")).Data ?? [];
+        if (Input.AddressId is null || useDefaultAddress) { Input.AddressId = Addresses.FirstOrDefault(a => a.IsDefault)?.Id ?? Addresses.FirstOrDefault()?.Id; }
+        if (Input.AddressId is null) { return; }
+        var summary = await Api.PostAsync<CheckoutSummaryDto>("api/v1/checkout/summary", Input);
+        if (summary.Ok) { Summary = summary.Data; }
+        else if (summary.Status == 409) { Problem("Your cart has nothing to check out."); }
+        else { Problem(summary.Message); }
+    }
+}
+
+<h1 class="h3">Checkout</h1>
+
+@if (Addresses.Count == 0)
+{
+    <div class="card card-body"><p>Add a delivery address to continue.</p><a class="btn btn-primary align-self-start" asp-page="/Addresses/Index" asp-route-add="true" asp-route-returnUrl="/checkout">Add new address</a></div>
+    return;
+}
+
+<form method="post" asp-page-handler="Summary" novalidate>
+    <input type="hidden" asp-for="IdempotencyKey" />
+    <div class="row g-4">
+        <div class="col-lg-7">
+            <section class="card card-body mb-3" aria-labelledby="addr">
+                <h2 class="h5" id="addr">1. Delivery address</h2>
+                @foreach (var a in Addresses)
+                {
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="radio" name="Input.AddressId" id="a-@a.Id" value="@a.Id" checked="@(Input.AddressId == a.Id)" data-autosubmit />
+                        <label class="form-check-label" for="a-@a.Id"><strong>@a.FullName</strong>, @a.AddressLine, @a.Area, @a.District <span class="text-muted">@a.Phone</span></label>
+                    </div>
+                }
+                <a asp-page="/Addresses/Index" asp-route-add="true" asp-route-returnUrl="/checkout">Add new address</a>
+            </section>
+
+            <section class="card card-body mb-3" aria-labelledby="pay">
+                <h2 class="h5" id="pay">2. Payment</h2>
+                @foreach (var (value, text) in new[] { ("COD", "Cash on delivery"), ("bKash", "bKash"), ("Nagad", "Nagad"), ("Card", "Card") })
+                {
+                    var hideCod = value == "COD" && Summary is not null && !Summary.CodAllowed && Summary.Payable > 0;
+                    if (hideCod) { continue; } // above the cash-on-delivery limit (BR-11)
+                    <div class="form-check mb-1">
+                        <input class="form-check-input" type="radio" name="Input.PaymentMethod" id="m-@value" value="@value" checked="@(Input.PaymentMethod == value)" data-autosubmit />
+                        <label class="form-check-label" for="m-@value">@text</label>
+                    </div>
+                }
+                @if (Summary is { StoreCreditBalance: > 0 })
+                {
+                    <div class="form-check form-switch mt-2">
+                        <input class="form-check-input" type="checkbox" role="switch" id="credit" name="Input.UseStoreCredit" value="true" checked="@Input.UseStoreCredit" data-autosubmit />
+                        <input type="hidden" name="Input.UseStoreCredit" value="false" />
+                        <label class="form-check-label" for="credit">Use store credit (@Format.Tk(Summary.StoreCreditBalance))</label>
+                    </div>
+                }
+                <div class="d-flex gap-2 mt-3">
+                    <label class="visually-hidden" for="coupon">Coupon code</label>
+                    <input class="form-control" id="coupon" name="Input.CouponCode" value="@Input.CouponCode" placeholder="Coupon code" pattern="[A-Za-z0-9]{4,20}" />
+                    <button class="btn btn-outline-primary" type="submit">Apply</button>
+                </div>
+                @if (Summary?.CouponMessage is { } couponMessage) { <div class="small mt-1" role="status">@couponMessage</div> }
+            </section>
+        </div>
+
+        <aside class="col-lg-5" aria-label="Order summary">
+            <div class="card card-body">
+                <h2 class="h5">3. Review</h2>
+                @if (Summary is null) { <p class="text-muted">The summary is not available right now.</p> }
+                else
+                {
+                    @foreach (var shop in Summary.Shops)
+                    {
+                        <div class="d-flex justify-content-between"><span>@shop.ShopName</span><span>@Format.Tk(shop.ItemsTotal)</span></div>
+                        <div class="d-flex justify-content-between small text-muted mb-1"><span>Delivery</span><span>@Format.Tk(shop.DeliveryFee)</span></div>
+                    }
+                    <hr />
+                    <dl class="row mb-0">
+                        <dt class="col-6 fw-normal">Items</dt><dd class="col-6 text-end">@Format.Tk(Summary.ItemsTotal)</dd>
+                        <dt class="col-6 fw-normal">Delivery</dt><dd class="col-6 text-end">@Format.Tk(Summary.DeliveryTotal)</dd>
+                        <dt class="col-6 fw-normal">Coupon</dt><dd class="col-6 text-end">-@Format.Tk(Summary.Discount)</dd>
+                        <dt class="col-6 fw-normal">Store credit</dt><dd class="col-6 text-end">-@Format.Tk(Summary.CreditUsed)</dd>
+                        <dt class="col-6">Payable</dt><dd class="col-6 text-end fw-bold">@Format.Tk(Summary.Payable)</dd>
+                    </dl>
+                    <p class="small text-muted mt-2">Returns are accepted within 7 days of delivery. By placing the order you accept the <a asp-page="/Pages/Show" asp-route-slug="terms">Terms</a>.</p>
+                    <button class="btn btn-accent w-100" type="submit" asp-page-handler="Place">Place order</button>
+                }
+            </div>
+        </aside>
+    </div>
+</form>

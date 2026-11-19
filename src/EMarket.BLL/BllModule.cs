@@ -39,6 +39,7 @@ public static class BllModule
         services.AddScoped<CartService>();
         services.AddScoped<CheckoutService>();
         services.AddScoped<OrderService>();
+        services.AddScoped<InvoiceService>();
         services.AddScoped<PaymentService>();
         services.AddScoped<RefundService>();
         services.AddScoped<ReturnService>();

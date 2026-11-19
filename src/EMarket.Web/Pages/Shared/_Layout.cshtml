@@ -1,52 +1,135 @@
-﻿<!DOCTYPE html>
+﻿@inject SiteInfo Site
+@{
+    var site = await Site.GetAsync();
+    var categories = await Site.CategoriesAsync();
+    var siteName = site.GetValueOrDefault("siteName", "EMarket");
+    var authed = User.Identity?.IsAuthenticated == true;
+    var isAdmin = User.IsInRole("Admin");
+    var isSeller = User.IsInRole("Seller");
+    var query = Context.Request.Query["q"].ToString();
+}
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>@ViewData["Title"] - EMarket.Web</title>
-    <script type="importmap"></script>
+    <title>@(ViewData["Title"] is string t ? $"{t} - {siteName}" : siteName)</title>
     <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
-    <link rel="stylesheet" href="~/EMarket.Web.styles.css" asp-append-version="true" />
 </head>
 <body>
-    <header>
-        <nav class="navbar navbar-expand-sm navbar-toggleable-sm navbar-light bg-white border-bottom box-shadow mb-3">
-            <div class="container">
-                <a class="navbar-brand" asp-area="" asp-page="/Index">EMarket.Web</a>
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse" aria-controls="navbarSupportedContent"
-                        aria-expanded="false" aria-label="Toggle navigation">
-                    <span class="navbar-toggler-icon"></span>
-                </button>
-                <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
-                    <ul class="navbar-nav flex-grow-1">
-                        <li class="nav-item">
-                            <a class="nav-link text-dark" asp-area="" asp-page="/Index">Home</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link text-dark" asp-area="" asp-page="/Privacy">Privacy</a>
-                        </li>
-                    </ul>
-                </div>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+        <div class="container d-flex flex-wrap align-items-center gap-2 py-2">
+            <a class="brand" asp-page="/Index">@siteName</a>
+            <form class="search flex-grow-1" method="get" asp-page="/Products/Index" role="search">
+                <label class="visually-hidden" for="site-search">Search products</label>
+                <input id="site-search" name="q" value="@query" class="form-control" type="search" placeholder="Search products" minlength="2" maxlength="100" />
+                <button class="btn btn-primary" type="submit">Search</button>
+            </form>
+            <nav class="d-flex align-items-center gap-1" aria-label="Account">
+                @if (!isAdmin)
+                {
+                    <a class="icon-link" asp-page="/Cart/Index" aria-label="Cart">
+                        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 4h2l2.4 10.4a1 1 0 0 0 1 .8h8.8a1 1 0 0 0 1-.8L20 8H6M9 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2m8 0a1 1 0 1 0 0-2 1 1 0 0 0 0 2" /></svg>
+                        <span class="badge text-bg-danger count-badge" data-count="cart" hidden>0</span>
+                    </a>
+                }
+                @if (authed)
+                {
+                    <a class="icon-link" asp-page="/Notifications/Index" aria-label="Notifications">
+                        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M6 8a6 6 0 1 1 12 0c0 7 3 7 3 9H3c0-2 3-2 3-9m4 12a2 2 0 0 0 4 0" /></svg>
+                        <span class="badge text-bg-danger count-badge" data-count="unread" hidden>0</span>
+                    </a>
+                    <div class="dropdown">
+                        <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">@User.Identity!.Name</button>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            @if (isAdmin)
+                            {
+                                <li><a class="dropdown-item" asp-area="Admin" asp-page="/Index">Admin dashboard</a></li>
+                            }
+                            @if (isSeller)
+                            {
+                                <li><a class="dropdown-item" asp-area="Seller" asp-page="/Index">Seller dashboard</a></li>
+                            }
+                            <li><a class="dropdown-item" asp-area="" asp-page="/Profile/Index">My profile</a></li>
+                            @if (!isAdmin)
+                            {
+                                <li><a class="dropdown-item" asp-area="" asp-page="/Orders/Index">My orders</a></li>
+                                <li><a class="dropdown-item" asp-area="" asp-page="/Wishlist/Index">Wishlist</a></li>
+                                <li><a class="dropdown-item" asp-area="" asp-page="/Addresses/Index">Address book</a></li>
+                                @if (!isSeller)
+                                {
+                                    <li><a class="dropdown-item" asp-area="" asp-page="/BecomeSeller/Status">Become a seller</a></li>
+                                }
+                            }
+                            <li><a class="dropdown-item" asp-area="" asp-page="/Account/ChangePassword">Change password</a></li>
+                            <li>
+                                <form method="post" asp-area="" asp-page="/Account/Logout"><button class="dropdown-item" type="submit">Log out</button></form>
+                            </li>
+                        </ul>
+                    </div>
+                }
+                else
+                {
+                    <a class="btn btn-outline-primary" asp-area="" asp-page="/Account/Login">Log in</a>
+                    <a class="btn btn-primary" asp-area="" asp-page="/Account/Register">Register</a>
+                }
+            </nav>
+        </div>
+        <nav class="category-bar" aria-label="Categories">
+            <div class="container d-flex gap-3 overflow-auto">
+                @foreach (var category in categories)
+                {
+                    <a asp-area="" asp-page="/Products/Index" asp-route-categoryId="@category.Id">@category.Name</a>
+                }
             </div>
         </nav>
     </header>
-    <div class="container">
-        <main role="main" class="pb-3">
-            @RenderBody()
-        </main>
+
+    @if (authed && User.FindFirst("emailConfirmed")?.Value == "false")
+    {
+        <div class="alert alert-warning rounded-0 mb-0 text-center" role="status">
+            Please verify your email to order or apply as a seller.
+            <form class="d-inline" method="post" asp-area="" asp-page="/Account/VerifyEmail" asp-page-handler="Resend"><button class="btn btn-link p-0 align-baseline" type="submit">Resend verification link</button></form>
+        </div>
+    }
+
+    <div class="toast-area" aria-live="polite">
+        @if (TempData["Success"] is string ok)
+        {
+            <div class="toast align-items-center text-bg-success border-0" role="status" data-bs-delay="6000">
+                <div class="d-flex"><div class="toast-body">@ok</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button></div>
+            </div>
+        }
+        @if (TempData["Error"] is string error)
+        {
+            <div class="toast align-items-center text-bg-danger border-0" role="alert" data-bs-autohide="false">
+                <div class="d-flex"><div class="toast-body">@error</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button></div>
+            </div>
+        }
     </div>
 
-    <footer class="border-top footer text-muted">
-        <div class="container">
-            &copy; 2026 - EMarket.Web - <a asp-area="" asp-page="/Privacy">Privacy</a>
+    <main id="main" class="container py-4">
+        @RenderBody()
+    </main>
+
+    <footer class="site-footer">
+        <div class="container py-4">
+            <nav class="d-flex flex-wrap gap-3 mb-2" aria-label="Information">
+                <a asp-area="" asp-page="/Pages/Show" asp-route-slug="about">About</a>
+                <a asp-area="" asp-page="/Pages/Contact">Contact</a>
+                <a asp-area="" asp-page="/Pages/Show" asp-route-slug="faq">FAQ</a>
+                <a asp-area="" asp-page="/Pages/Show" asp-route-slug="terms">Terms</a>
+                <a asp-area="" asp-page="/Pages/Show" asp-route-slug="privacy">Privacy</a>
+            </nav>
+            <p class="mb-0 text-muted">@site.GetValueOrDefault("footerText", "EMarket, a marketplace for Bangladesh.")</p>
         </div>
     </footer>
 
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>
-
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

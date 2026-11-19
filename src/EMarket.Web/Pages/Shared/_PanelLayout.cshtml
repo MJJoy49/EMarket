@@ -1,0 +1,35 @@
+@{
+    Layout = "_Layout";
+    var area = (string?)ViewContext.RouteData.Values["area"] ?? "";
+    var isAdmin = area == "Admin";
+    (string Page, string Text)[] adminMenu =
+    [
+        ("/Index", "Dashboard"), ("/Users/Index", "Users"), ("/Applications/Index", "Applications"), ("/Products/Index", "Products"), ("/Categories/Index", "Categories"),
+        ("/Orders/Index", "Orders"), ("/Returns/Index", "Returns"), ("/Payments/Index", "Payments"), ("/Payouts/Index", "Payouts"), ("/Promotions/Index", "Coupons and banners"),
+        ("/Messages/Index", "Messages"), ("/Reports/Index", "Reports"), ("/Settings/Index", "Settings"),
+    ];
+    (string Page, string Text)[] sellerMenu =
+    [
+        ("/Index", "Dashboard"), ("/Products/Index", "My products"), ("/Orders/Index", "Orders"), ("/Returns/Index", "Returns"), ("/Reviews/Index", "Reviews"),
+        ("/Earnings/Index", "Earnings"), ("/Shop/Index", "Shop settings"),
+    ];
+    var menu = isAdmin ? adminMenu : sellerMenu;
+    var current = ViewContext.RouteData.Values["page"]?.ToString() ?? "";
+}
+<div class="row g-4">
+    <div class="col-lg-3 col-xl-2">
+        <button class="btn btn-outline-secondary d-lg-none mb-2" type="button" data-bs-toggle="collapse" data-bs-target="#panel-menu" aria-expanded="false" aria-controls="panel-menu">Menu</button>
+        <nav id="panel-menu" class="panel-menu collapse d-lg-block" aria-label="@(isAdmin ? "Admin" : "Seller") menu">
+            <ul class="nav flex-column">
+                @foreach (var (target, text) in menu)
+                {
+                    var active = current == target || (target != "/Index" && current.StartsWith(target[..target.LastIndexOf('/')]));
+                    <li class="nav-item"><a class="nav-link @(active ? "active" : "")" asp-area="@area" asp-page="@target" aria-current="@(active ? "page" : null)">@text</a></li>
+                }
+            </ul>
+        </nav>
+    </div>
+    <div class="col-lg-9 col-xl-10">
+        @RenderBody()
+    </div>
+</div>

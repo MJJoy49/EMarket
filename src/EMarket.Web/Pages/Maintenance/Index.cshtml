@@ -1,0 +1,17 @@
+@page "/Maintenance"
+@{
+    ViewData["Title"] = "Maintenance";
+}
+@functions {
+    public void OnGet()
+    {
+        Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        Response.Headers.RetryAfter = "600";
+    }
+}
+
+<section class="text-center py-5">
+    <h1 class="h3">We are making EMarket better</h1>
+    <p>The site is under maintenance. Please come back in a little while.</p>
+    <a class="btn btn-primary" asp-page="/Index">Try again</a>
+</section>

@@ -1,0 +1,107 @@
+@page "/seller/earnings"
+@using EMarket.Shared.Dtos.Sellers
+@using EMarket.Shared.Results
+@{
+    ViewData["Title"] = "Earnings and payouts";
+}
+@functions {
+    [BindProperty] public PayoutRequest Payout { get; set; } = new();
+    public SellerDashboardDto? Dashboard { get; private set; }
+    public IReadOnlyList<EarningRowDto> Earnings { get; private set; } = [];
+    public PagedResult<PayoutDto>? Payouts { get; private set; }
+
+    public async Task OnGetAsync()
+    {
+        Dashboard = (await Api.GetAsync<SellerDashboardDto>("api/v1/seller/dashboard")).Data;
+        Earnings = (await Api.GetAsync<List<EarningRowDto>>($"api/v1/seller/earnings?from={Request.Query["from"]}&to={Request.Query["to"]}")).Data ?? [];
+        Payouts = (await Api.GetAsync<PagedResult<PayoutDto>>("api/v1/seller/payouts")).Data;
+    }
+
+    public async Task<IActionResult> OnPostRequestAsync()
+    {
+        var result = await Api.PostAsync<System.Text.Json.JsonElement>("api/v1/seller/payouts", Payout);
+        if (result.Ok) { Success(Messages.PayoutSent); } else { Problem(result.Message); }
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostCancelAsync(Guid id)
+    {
+        if (!Failed(await Api.PostAsync<Empty>($"api/v1/seller/payouts/{id}/cancel"))) { Success("The request was cancelled. The amount is available again."); }
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnGetExportAsync()
+    {
+        var file = await Api.DownloadAsync($"api/v1/seller/earnings.xlsx?from={Request.Query["from"]}&to={Request.Query["to"]}");
+        if (!file.Ok) { Problem(file.Message); return RedirectToPage(); }
+        return File(file.Data!.Content, file.Data.ContentType, "earnings.xlsx");
+    }
+}
+
+<h1 class="h3">Earnings and payouts</h1>
+@if (Dashboard is not null)
+{
+    <div class="row g-3 mb-3">
+        @foreach (var (label, value) in new[] { ("Available", Dashboard.Balances.Available), ("Pending", Dashboard.Balances.Pending), ("Reserved", Dashboard.Balances.Reserved), ("Paid out", Dashboard.Balances.PaidOut) })
+        {
+            <div class="col-6 col-md-3"><div class="stat-tile"><div class="text-muted small">@label</div><div class="value">@Format.Tk(value)</div></div></div>
+        }
+    </div>
+    @if (Dashboard.Balances.Negative) { <div class="alert alert-warning" role="status">Negative balance: @Format.Tk(-Dashboard.Balances.Available) will be set off against new earnings. Payouts are blocked until then.</div> }
+    <form class="card card-body mb-4" method="post" asp-page-handler="Request" style="max-width: 520px">
+        <label class="form-label" asp-for="Payout.Amount">Payout amount (Tk) <span aria-hidden="true">*</span></label>
+        <div class="input-group">
+            <input class="form-control" asp-for="Payout.Amount" type="number" min="500" step="0.01" required aria-describedby="payout-help" />
+            <button class="btn btn-primary" type="submit" disabled="@(Dashboard.Balances.Available < 500)">Request payout</button>
+        </div>
+        <div class="form-text" id="payout-help">Minimum Tk 500. You can have one open request at a time.</div>
+    </form>
+}
+
+<section class="mb-4" aria-labelledby="payouts">
+    <h2 class="h5" id="payouts">Payout history</h2>
+    @if (Payouts is null || Payouts.Items.Count == 0) { <p class="text-muted">No payout requests yet.</p> }
+    else
+    {
+        <table class="table align-middle table-cards">
+            <thead><tr><th scope="col">Date</th><th scope="col">Amount</th><th scope="col">Method</th><th scope="col">Status</th><th scope="col">Reference or reason</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+            <tbody>
+                @foreach (var p in Payouts.Items)
+                {
+                    <tr>
+                        <td data-label="Date">@Format.Date(p.RequestedAt)</td><td data-label="Amount">@Format.Tk(p.Amount)</td><td data-label="Method">@p.Method</td>
+                        <td data-label="Status"><span class="badge @Format.Badge(p.Status)">@p.Status</span></td>
+                        <td data-label="Reference">@(p.ReferenceNo ?? p.RejectionReason)</td>
+                        <td class="text-end">@if (p.Status == "Requested") { <form method="post" asp-page-handler="Cancel" asp-route-id="@p.Id" data-confirm="Cancel this payout request?"><button class="btn btn-outline-secondary btn-sm" type="submit">Cancel</button></form> }</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</section>
+
+<section aria-labelledby="earned">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+        <h2 class="h5 mb-0" id="earned">Earnings</h2>
+        <form class="d-flex flex-wrap gap-2 align-items-end" method="get">
+            <div><label class="form-label small mb-0" for="from">From</label><input class="form-control" id="from" name="from" type="date" value="@Request.Query["from"]" /></div>
+            <div><label class="form-label small mb-0" for="to">To</label><input class="form-control" id="to" name="to" type="date" value="@Request.Query["to"]" /></div>
+            <button class="btn btn-outline-primary" type="submit">Filter</button>
+            <button class="btn btn-outline-secondary" type="submit" asp-page-handler="Export">Export to Excel</button>
+        </form>
+    </div>
+    @if (Earnings.Count == 0) { <p class="text-muted">No delivered orders in this period.</p> }
+    else
+    {
+        <table class="table table-sm align-middle table-cards">
+            <thead><tr><th scope="col">Date</th><th scope="col">Order</th><th scope="col">Items</th><th scope="col">Commission</th><th scope="col">Delivery fee</th><th scope="col">Net</th><th scope="col">State</th></tr></thead>
+            <tbody>
+                @foreach (var e in Earnings)
+                {
+                    <tr><td data-label="Date">@Format.Date(e.Date)</td><td data-label="Order">@e.OrderNumber</td><td data-label="Items">@Format.Tk(e.ItemsTotal)</td><td data-label="Commission">@Format.Tk(e.Commission)</td><td data-label="Delivery fee">@Format.Tk(e.DeliveryFee)</td><td data-label="Net">@Format.Tk(e.Net)</td><td data-label="State">@e.State</td></tr>
+                }
+            </tbody>
+            <tfoot><tr class="fw-bold"><td colspan="2">Total</td><td>@Format.Tk(Earnings.Sum(e => e.ItemsTotal))</td><td>@Format.Tk(Earnings.Sum(e => e.Commission))</td><td>@Format.Tk(Earnings.Sum(e => e.DeliveryFee))</td><td>@Format.Tk(Earnings.Sum(e => e.Net))</td><td></td></tr></tfoot>
+        </table>
+    }
+</section>

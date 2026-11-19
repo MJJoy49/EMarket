@@ -1,0 +1,96 @@
+@page "/seller/shop"
+@using System.Text.Json
+@using EMarket.Shared.Dtos.Sellers
+@{
+    ViewData["Title"] = "Shop settings";
+}
+@functions {
+    [BindProperty] public ShopSettingsRequest Input { get; set; } = new();
+    [BindProperty] public PayoutDetailsRequest Details { get; set; } = new();
+    public ShopSettingsDto? Shop { get; private set; }
+
+    public async Task OnGetAsync()
+    {
+        await LoadAsync();
+        if (Shop is not null)
+        {
+            Input = new ShopSettingsRequest { Name = Shop.Name, Description = Shop.Description, InsideDhakaFee = Shop.InsideDhakaFee, OutsideDhakaFee = Shop.OutsideDhakaFee, FreeDeliveryAbove = Shop.FreeDeliveryAbove, Vacation = Shop.Status == "Vacation" };
+        }
+    }
+
+    public async Task<IActionResult> OnPostSaveAsync()
+    {
+        ModelState.Remove("Details");
+        var result = await Api.PutAsync<JsonElement>("api/v1/seller/shop", Input);
+        if (!result.Ok) { await LoadAsync(); AddErrors(result); return Page(); }
+        Success(Messages.Saved);
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostImageAsync(string kind, IFormFile? file)
+    {
+        if (file is null) { Problem(Messages.BadFile); return RedirectToPage(); }
+        using var memory = new MemoryStream();
+        await file.CopyToAsync(memory);
+        var result = await Api.PostFormAsync<JsonElement>($"api/v1/seller/shop/{kind}", new Dictionary<string, string?>(), [new FormFilePart("file", file.FileName, memory.ToArray())]);
+        if (!Failed(result)) { Success(Messages.Saved); }
+        return RedirectToPage();
+    }
+
+    // FR-15.10: changing where the money goes needs the password again.
+    public async Task<IActionResult> OnPostPayoutAsync()
+    {
+        var result = await Api.PutAsync<JsonElement>("api/v1/seller/shop/payout-details", Details);
+        Details.CurrentPassword = "";
+        if (!result.Ok) { await LoadAsync(); AddErrors(result, "Details"); return Page(); }
+        Success(Messages.Saved + " We emailed you an alert about this change.");
+        return RedirectToPage();
+    }
+
+    private async Task LoadAsync() => Shop = (await Api.GetAsync<ShopSettingsDto>("api/v1/seller/shop")).Data;
+}
+
+<h1 class="h3">Shop settings</h1>
+@if (Shop is null) { return; }
+@if (Shop.Status == "Suspended") { <div class="alert alert-danger" role="alert">@Messages.ShopUnavailable Please contact support.</div> }
+
+<div class="row g-4">
+    <div class="col-lg-7">
+        <form class="card card-body mb-3" method="post" asp-page-handler="Save" novalidate>
+            <div asp-validation-summary="All" class="text-danger mb-2" role="alert"></div>
+            <div class="mb-3"><label class="form-label" asp-for="Input.Name">Shop name <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Input.Name" required /></div>
+            <div class="mb-3"><label class="form-label" asp-for="Input.Description">Description</label><textarea class="form-control" asp-for="Input.Description" rows="3" maxlength="1000"></textarea></div>
+            <div class="row g-2 mb-3">
+                <div class="col-md-4"><label class="form-label" asp-for="Input.InsideDhakaFee">Delivery inside Dhaka (Tk)</label><input class="form-control" asp-for="Input.InsideDhakaFee" type="number" min="0" max="1000" step="1" /></div>
+                <div class="col-md-4"><label class="form-label" asp-for="Input.OutsideDhakaFee">Outside Dhaka (Tk)</label><input class="form-control" asp-for="Input.OutsideDhakaFee" type="number" min="0" max="1000" step="1" /></div>
+                <div class="col-md-4"><label class="form-label" asp-for="Input.FreeDeliveryAbove">Free delivery above (Tk)</label><input class="form-control" asp-for="Input.FreeDeliveryAbove" type="number" min="0" max="100000" step="1" /></div>
+            </div>
+            <div class="form-check form-switch mb-3"><input class="form-check-input" asp-for="Input.Vacation" role="switch" /><label class="form-check-label" asp-for="Input.Vacation">Vacation mode (your products are hidden, existing orders continue)</label></div>
+            <button class="btn btn-primary align-self-start" type="submit">Save changes</button>
+        </form>
+        @foreach (var kind in new[] { "logo", "banner" })
+        {
+            <form class="card card-body mb-3" method="post" asp-page-handler="Image" enctype="multipart/form-data">
+                <input type="hidden" name="kind" value="@kind" />
+                <label class="form-label" for="f-@kind">@(kind == "logo" ? "Logo" : "Banner") (JPG or PNG, up to 2 MB)</label>
+                <div class="d-flex gap-2"><input class="form-control" id="f-@kind" name="file" type="file" accept="image/jpeg,image/png" required /><button class="btn btn-outline-primary" type="submit">Upload</button></div>
+            </form>
+        }
+    </div>
+    <div class="col-lg-5">
+        <form class="card card-body" method="post" asp-page-handler="Payout" novalidate>
+            <h2 class="h5">Payout details</h2>
+            <p class="small text-muted">Current: @Shop.PayoutMethod, account @Shop.PayoutAccountMasked. A change needs your password and applies only to payouts you request afterwards.</p>
+            <div asp-validation-summary="All" class="text-danger mb-2" role="alert"></div>
+            <div class="mb-2"><label class="form-label" asp-for="Details.PayoutMethod">Method</label><select class="form-select" asp-for="Details.PayoutMethod"><option value="bKash">bKash</option><option value="Nagad">Nagad</option><option value="BankTransfer">Bank transfer</option></select></div>
+            <div class="mb-2"><label class="form-label" asp-for="Details.WalletNumber">Mobile number (bKash or Nagad)</label><input class="form-control" asp-for="Details.WalletNumber" type="tel" inputmode="numeric" /></div>
+            <div class="mb-2"><label class="form-label" asp-for="Details.BankName">Bank name</label><input class="form-control" asp-for="Details.BankName" /></div>
+            <div class="mb-2"><label class="form-label" asp-for="Details.BankBranch">Branch</label><input class="form-control" asp-for="Details.BankBranch" /></div>
+            <div class="mb-2"><label class="form-label" asp-for="Details.RoutingNumber">Routing number</label><input class="form-control" asp-for="Details.RoutingNumber" inputmode="numeric" /></div>
+            <div class="mb-2"><label class="form-label" asp-for="Details.AccountName">Account name</label><input class="form-control" asp-for="Details.AccountName" /></div>
+            <div class="mb-2"><label class="form-label" asp-for="Details.AccountNumber">Account number</label><input class="form-control" asp-for="Details.AccountNumber" inputmode="numeric" /></div>
+            <div class="mb-3"><label class="form-label" asp-for="Details.CurrentPassword">Your password <span aria-hidden="true">*</span></label><input class="form-control" asp-for="Details.CurrentPassword" type="password" autocomplete="current-password" required /></div>
+            <button class="btn btn-primary align-self-start" type="submit">Change payout details</button>
+        </form>
+    </div>
+</div>

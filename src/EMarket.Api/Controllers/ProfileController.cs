@@ -13,6 +13,9 @@ public sealed class ProfileController(ProfileService profiles) : ApiControllerBa
     [HttpGet]
     public Task<ProfileDto> Get(CancellationToken ct) => profiles.GetAsync(UserId, ct);
 
+    [HttpGet("credit-history")]
+    public Task<IReadOnlyList<CreditLineDto>> CreditHistory(CancellationToken ct) => profiles.CreditHistoryAsync(UserId, ct);
+
     [HttpPut]
     public async Task<IActionResult> Update(UpdateProfileRequest request, CancellationToken ct)
     {

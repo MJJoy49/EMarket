@@ -50,6 +50,9 @@ public sealed class CartService(AppDbContext db, ISettingsReader settings, ICloc
         return new CartDto(shops, states.Count, itemsTotal, delivery, cart?.Coupon?.Code, discount, itemsTotal + delivery - discount);
     }
 
+    public async Task<int> CountAsync(Guid userId, CancellationToken ct = default) =>
+        await db.CartItems.Where(i => i.Cart.UserId == userId).SumAsync(i => (int?)i.Quantity, ct) ?? 0;
+
     public async Task AddAsync(Guid userId, AddToCartRequest request, CancellationToken ct = default)
     {
         var product = await db.Products.Include(p => p.Shop).Include(p => p.ProductVariants).Include(p => p.Category).ThenInclude(c => c.Parent)
@@ -106,6 +109,33 @@ public sealed class CartService(AppDbContext db, ISettingsReader settings, ICloc
         }
 
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>FR-10.9: copies the items of an old order into the cart, keeping the variant. Items that cannot be bought now are skipped and named.</summary>
+    public async Task<IReadOnlyList<string>> ReorderAsync(Guid userId, Guid orderId, CancellationToken ct = default)
+    {
+        var items = await db.OrderItems.AsNoTracking().Where(i => i.OrderId == orderId && i.Order.BuyerId == userId)
+            .Select(i => new { i.ProductId, i.VariantId, i.Quantity, i.ProductName }).ToListAsync(ct);
+        if (items.Count == 0)
+        {
+            throw new AppException(404, Messages.NotFound);
+        }
+
+        var skipped = new List<string>();
+        foreach (var item in items)
+        {
+            try
+            {
+                await AddAsync(userId, new AddToCartRequest { ProductId = item.ProductId, VariantId = item.VariantId, Quantity = Math.Min(item.Quantity, MaxQuantity) }, ct);
+            }
+            catch (AppException)
+            {
+                skipped.Add(item.ProductName);
+                db.ChangeTracker.Clear();
+            }
+        }
+
+        return skipped;
     }
 
     public async Task SetQuantityAsync(Guid userId, Guid lineId, int quantity, CancellationToken ct = default)

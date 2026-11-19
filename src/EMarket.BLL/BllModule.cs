@@ -1,3 +1,4 @@
+using EMarket.BLL.AfterSale;
 using EMarket.BLL.Catalog;
 using EMarket.BLL.Common;
 using EMarket.BLL.Finance;
@@ -38,6 +39,10 @@ public static class BllModule
         services.AddScoped<OrderService>();
         services.AddScoped<PaymentService>();
         services.AddScoped<RefundService>();
+        services.AddScoped<ReturnService>();
+        services.AddScoped<ReviewService>();
+        services.AddScoped<NotificationService>();
+        services.AddScoped<EarningsService>();
         return services;
     }
 }

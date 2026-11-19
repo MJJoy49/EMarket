@@ -201,6 +201,11 @@ public sealed class RefundService(AppDbContext db, IPaymentGateway gateway, Ledg
         }
 
         refund.Status = "Completed";
+        if (refund.ReturnRequestId is { } returnId && await db.ReturnRequests.FirstOrDefaultAsync(r => r.Id == returnId, ct) is { } returnRequest)
+        {
+            returnRequest.Status = "Refunded"; // FR-13.12
+        }
+
         var lines = new List<Ledger.Line>();
         if (refund.Order.DeliveredAt is null)
         {

@@ -40,9 +40,9 @@ public sealed class OrderFlowTests
         ledger = new Ledger(db);
         carts = new CartService(db, settings, clock);
         checkout = new CheckoutService(db, carts, ledger, notifier, settings, clock);
-        orders = new OrderService(db, ledger, notifier, settings, clock);
-        payments = new PaymentService(db, gateway, orders, ledger, notifier, clock, NullLogger<PaymentService>.Instance);
         refunds = new RefundService(db, gateway, ledger, notifier, NullLogger<RefundService>.Instance);
+        orders = new OrderService(db, ledger, notifier, settings, clock, refunds);
+        payments = new PaymentService(db, gateway, orders, ledger, notifier, clock, NullLogger<PaymentService>.Instance);
 
         buyer = db.AddUser();
         seller = db.AddUser(Roles.Seller);

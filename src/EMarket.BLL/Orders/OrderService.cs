@@ -1,5 +1,6 @@
 using EMarket.BLL.Common;
 using EMarket.BLL.Finance;
+using EMarket.BLL.Payments;
 using EMarket.DAL.Data;
 using EMarket.Domain.Entities;
 using EMarket.Shared.Constants;
@@ -10,8 +11,10 @@ using Microsoft.EntityFrameworkCore;
 namespace EMarket.BLL.Orders;
 
 /// <summary>Order tracking for buyers (FR-10), sellers (FR-11) and admins (FR-18), with the effects of each status change.</summary>
-public sealed class OrderService(AppDbContext db, Ledger ledger, Notifier notifier, ISettingsReader settings, IClock clock)
+public sealed class OrderService(AppDbContext db, Ledger ledger, Notifier notifier, ISettingsReader settings, IClock clock, RefundService refunds)
 {
+    private readonly List<Guid> newRefunds = [];
+
     private const int PageSize = 20;
 
     // ---------- reading ----------
@@ -231,10 +234,12 @@ public sealed class OrderService(AppDbContext db, Ledger ledger, Notifier notifi
         var paid = group.Payments.FirstOrDefault(p => p.Status is "Paid" or "PartlyRefunded");
         if (paid is not null && order.TotalAmount > 0)
         {
-            db.Refunds.Add(new Refund
+            var refund = new Refund
             {
                 Id = Guid.CreateVersion7(), PaymentId = paid.Id, OrderId = order.Id, Amount = order.TotalAmount, Method = "OriginalMethod", Status = "Pending",
-            });
+            };
+            db.Refunds.Add(refund);
+            newRefunds.Add(refund.Id);
         }
 
         if (!othersOpen)
@@ -302,6 +307,13 @@ public sealed class OrderService(AppDbContext db, Ledger ledger, Notifier notifi
         catch (DbUpdateConcurrencyException)
         {
             throw new AppException(409, Messages.Conflict); // NFR-13: two people changed the order at once
+        }
+
+        // FR-13.8: a paid order that is cancelled is refunded at once; a gateway failure stays for the job and the admin retry.
+        foreach (var id in newRefunds.ToList())
+        {
+            newRefunds.Remove(id);
+            await refunds.ExecuteAsync(id, ct);
         }
     }
 
